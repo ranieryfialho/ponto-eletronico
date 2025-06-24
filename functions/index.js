@@ -8,14 +8,12 @@ const { getDistanceInMeters } = require('./haversine.js');
 
 const app = express();
 
-// Substitua pela URL do seu Firebase Hosting
 app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
 
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
 const ALLOWED_RADIUS_METERS = 500;
-const ALLOWED_IPS = ['::1', '127.0.0.1'];
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -44,7 +42,6 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
     const requestIp = req.ip;
     const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
     if (distance > ALLOWED_RADIUS_METERS) { return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` }); }
-    if (!ALLOWED_IPS.includes(requestIp)) { return res.status(400).json({ error: 'Você não parece estar conectado na rede da escola.' }); }
     const timeRecord = { userId: userId, timestamp: new Date(), location: location, type: type, validatedIp: requestIp, };
     const docRef = await db.collection('timeEntries').add(timeRecord);
     res.status(201).json({ success: `Registro de '${type}' realizado com sucesso!`, docId: docRef.id });
