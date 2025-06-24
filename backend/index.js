@@ -47,7 +47,6 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` });
     }
 
-    // Validação de IP
     if (!ALLOWED_IPS.includes(requestIp)) {
       return res.status(400).json({ error: 'Você não parece estar conectado na rede da escola.' });
     }
@@ -67,6 +66,54 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   } catch (error) {
     console.error("Erro no servidor ao registrar ponto:", error);
     res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+  }
+});
+
+const verifyAdmin = (req, res, next) => {
+  if (req.user.admin === true) {
+    return next();
+  }
+  return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
+};
+
+app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const listUsersResult = await admin.auth().listUsers(1000);
+    const users = listUsersResult.users.map(userRecord => ({
+      uid: userRecord.uid,
+      email: userRecord.email,
+      displayName: userRecord.displayName,
+      lastSignInTime: userRecord.metadata.lastSignInTime,
+      creationTime: userRecord.metadata.creationTime,
+    }));
+    res.status(200).json(users);
+  } catch (error) {
+    console.error('Erro ao listar usuários:', error);
+    res.status(500).json({ error: 'Erro interno ao buscar lista de usuários.' });
+  }
+});
+
+app.post('/api/admin/create-user', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ error: 'Forneça um e-mail válido e uma senha com no mínimo 6 caracteres.' });
+    }
+
+    const userRecord = await admin.auth().createUser({
+      email: email,
+      password: password,
+    });
+
+    res.status(201).json({ success: 'Usuário criado com sucesso!', uid: userRecord.uid });
+
+  } catch (error) {
+    if (error.code === 'auth/email-already-exists') {
+      return res.status(409).json({ error: 'Este e-mail já está em uso.' });
+    }
+    console.error('Erro ao criar usuário:', error);
+    res.status(500).json({ error: 'Erro interno ao criar usuário.' });
   }
 });
 

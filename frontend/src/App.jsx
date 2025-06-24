@@ -1,9 +1,9 @@
-// src/App.jsx (Versão com Lógica de Estados)
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { Auth } from './components/Auth';
+import { AdminPanel } from './components/AdminPanel';
 
 const STATUS = {
   LOADING: 'carregando...',
@@ -17,34 +17,48 @@ const ENTRY_TYPES = {
   BREAK_START: 'Início do Intervalo',
   BREAK_END: 'Fim do Intervalo',
   CLOCK_OUT: 'Saída',
-}
+};
 
 function App() {
   const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+
   const [timeHistory, setTimeHistory] = useState([]);
   const [userStatus, setUserStatus] = useState(STATUS.LOADING);
   const [message, setMessage] = useState("Bem-vindo!");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Listener de Autenticação
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        const tokenResult = await currentUser.getIdTokenResult();
+        setIsAdmin(tokenResult.claims.admin === true);
+      } else {
+        setIsAdmin(false);
+      }
+    });
     return () => unsubscribe();
   }, []);
 
-  // Listener de Histórico e Status
   useEffect(() => {
     if (!user) {
       setUserStatus(STATUS.CLOCKED_OUT);
       setTimeHistory([]);
       return;
     }
-    const q = query(collection(db, "timeEntries"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+
+    const q = query(
+      collection(db, "timeEntries"),
+      where("userId", "==", user.uid),
+      orderBy("timestamp", "desc")
+    );
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTimeHistory(entries);
-      
-      // Determina o status atual com base no último registro
+
       if (entries.length === 0) {
         setUserStatus(STATUS.CLOCKED_OUT);
       } else {
@@ -58,6 +72,7 @@ function App() {
         }
       }
     });
+
     return () => unsubscribe();
   }, [user]);
 
@@ -82,9 +97,13 @@ function App() {
       const token = await user.getIdToken();
       const response = await fetch('http://localhost:3001/api/clock-in', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ location, type }),
       });
+
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       setMessage(`✅ ${data.success}`);
@@ -117,36 +136,64 @@ function App() {
     }
   };
 
+  const renderMainContent = () => {
+    if (showAdminPanel) {
+      return <AdminPanel onBack={() => setShowAdminPanel(false)} />;
+    }
+
+    return (
+      <div className="w-full max-w-md">
+        <div className="p-6 bg-white rounded-lg shadow-lg">
+          <p className="mb-2">Bem-vindo, {user.email}!</p>
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdminPanel(true)}
+              className="w-full mb-4 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Painel do Administrador
+            </button>
+          )}
+
+          <p className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-gray-50 rounded-lg">
+            {message}
+          </p>
+
+          <div className="space-y-4">
+            {renderActionButtons()}
+          </div>
+
+          <button
+            onClick={() => signOut(auth)}
+            className="mt-6 text-sm text-gray-600 hover:text-red-500"
+          >
+            Sair
+          </button>
+        </div>
+
+        {timeHistory.length > 0 && (
+          <div className="mt-8 w-full">
+            <h2 className="text-2xl font-bold mb-4">Seu Histórico Recente</h2>
+            <ul className="bg-white rounded-lg shadow-lg text-left overflow-hidden">
+              {timeHistory.map((entry) => (
+                <li key={entry.id} className="p-4 border-b border-gray-200 last:border-b-0 flex justify-between items-center">
+                  <span className="font-semibold text-gray-700">{entry.type}</span>
+                  <span className="text-sm text-gray-500">
+                    {entry.timestamp.toDate().toLocaleString('pt-BR')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 text-center p-4">
       <h1 className="text-4xl font-bold text-gray-800 mb-6">Ponto Eletrônico</h1>
-      
-      {!user ? <Auth /> : (
-        <div className="w-full max-w-md">
-          <div className="p-6 bg-white rounded-lg shadow-lg">
-            <p className="mb-2">Bem-vindo, {user.email}!</p>
-            <p className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-gray-50 rounded-lg">{message}</p>
-            <div className="space-y-4">
-              {renderActionButtons()}
-            </div>
-            <button onClick={() => signOut(auth)} className="mt-6 text-sm text-gray-600 hover:text-red-500">Sair</button>
-          </div>
-
-          {timeHistory.length > 0 && (
-            <div className="mt-8 w-full">
-              <h2 className="text-2xl font-bold mb-4">Seu Histórico Recente</h2>
-              <ul className="bg-white rounded-lg shadow-lg text-left overflow-hidden">
-                {timeHistory.map((entry) => (
-                  <li key={entry.id} className="p-4 border-b border-gray-200 last:border-b-0 flex justify-between items-center">
-                    <span className="font-semibold text-gray-700">{entry.type}</span>
-                    <span className="text-sm text-gray-500">{entry.timestamp.toDate().toLocaleString('pt-BR')}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+      {!user ? <Auth /> : renderMainContent()}
     </div>
   );
 }
