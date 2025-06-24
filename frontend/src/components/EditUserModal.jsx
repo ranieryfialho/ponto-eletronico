@@ -1,3 +1,4 @@
+// src/components/EditUserModal.jsx (Completo e com fetch relativo)
 import React, { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { auth } from '../firebase-config';
@@ -28,7 +29,8 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
         setError('');
         try {
           const token = await auth.currentUser.getIdToken();
-          const response = await fetch(`http://localhost:3001/api/admin/employees/${user.uid}`, {
+          // fetch com caminho relativo
+          const response = await fetch(`/api/admin/employees/${user.uid}`, {
             headers: { 'Authorization': `Bearer ${token}` },
           });
           if (!response.ok) throw new Error('Falha ao buscar perfil.');
@@ -61,7 +63,8 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
     setError('');
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch(`http://localhost:3001/api/admin/users/${user.uid}`, {
+      // fetch com caminho relativo
+      const response = await fetch(`/api/admin/users/${user.uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ displayName, email, cpf, cargo, workHours }),

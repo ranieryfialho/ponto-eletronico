@@ -1,3 +1,4 @@
+// src/components/AdminPanel.jsx (Completo e com fetch relativo)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import { EditUserModal } from './EditUserModal';
@@ -21,7 +22,8 @@ export function AdminPanel({ onBack }) {
     setError('');
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch('http://localhost:3001/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+      // fetch com caminho relativo
+      const response = await fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || 'Falha ao buscar usuários.');
@@ -47,14 +49,14 @@ export function AdminPanel({ onBack }) {
     setFormMessage('');
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch('http://localhost:3001/api/admin/create-user', {
+      // fetch com caminho relativo
+      const response = await fetch('/api/admin/create-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ displayName: newName, email: newEmail }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      
       toast.success('Usuário criado com sucesso!');
       setFormMessage(
         <div>
@@ -78,7 +80,8 @@ export function AdminPanel({ onBack }) {
     if (!window.confirm(`Você tem certeza que deseja remover ${email}?`)) return;
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch(`http://localhost:3001/api/admin/users/${uid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      // fetch com caminho relativo
+      const response = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       toast.success(data.success);
@@ -112,7 +115,7 @@ export function AdminPanel({ onBack }) {
       <div className="w-full max-w-3xl mx-auto space-y-8">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-800">Gerenciar Funcionários</h1>
-          <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-100 px-3 py-2 rounded-lg shadow-sm">
+          <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-100 px-3 py-2 rounded-lg shadow-sm transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
             Sair do Painel
           </button>
