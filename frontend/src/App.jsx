@@ -1,3 +1,4 @@
+// src/App.jsx (Versão 100% Completa e Corrigida)
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -114,6 +115,11 @@ function App() {
     }
   };
 
+  // ESTA É A FUNÇÃO QUE ESTAVA FALTANDO
+  const handleLogout = () => {
+    signOut(auth);
+  };
+
   const renderActionButtons = () => {
     if (isLoading) {
       return <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">Aguarde...</button>;
@@ -122,6 +128,7 @@ function App() {
     switch (userStatus) {
       case STATUS.CLOCKED_OUT:
         return <button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_IN)} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg">▶️ Iniciar Expediente</button>;
+
       case STATUS.WORKING:
         return (
           <div className="flex gap-4">
@@ -129,8 +136,10 @@ function App() {
             <button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_OUT)} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg">⏹️ Encerrar Expediente</button>
           </div>
         );
+
       case STATUS.ON_BREAK:
         return <button onClick={() => handleRegister(ENTRY_TYPES.BREAK_END)} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg">▶️ Retornar do Intervalo</button>;
+
       default:
         return <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">Carregando status...</button>;
     }
@@ -144,7 +153,7 @@ function App() {
     return (
       <div className="w-full max-w-md">
         <div className="p-6 bg-white rounded-lg shadow-lg">
-          <p className="mb-2">Bem-vindo, {user.email}!</p>
+          <p className="mb-2">Bem-vindo, {user.displayName || user.email}!</p>
 
           {isAdmin && (
             <button
@@ -164,9 +173,10 @@ function App() {
           </div>
 
           <button
-            onClick={() => signOut(auth)}
-            className="mt-6 text-sm text-gray-600 hover:text-red-500"
+            onClick={handleLogout}
+            className="w-full mt-4 flex items-center justify-center gap-2 bg-red-500 border border-gray-300 text-white font-medium py-2 px-4 rounded-lg hover:bg-red-700 transition-colors shadow-sm"
           >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             Sair
           </button>
         </div>
