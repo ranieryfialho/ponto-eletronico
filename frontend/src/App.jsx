@@ -1,66 +1,92 @@
-import React, { useState } from 'react';
+// src/App.jsx (Versão com Lógica de Estados)
+import React, { useState, useEffect } from 'react';
+import { auth, db } from './firebase-config';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { Auth } from './components/Auth';
+
+const STATUS = {
+  LOADING: 'carregando...',
+  CLOCKED_OUT: 'fora_do_expediente',
+  WORKING: 'trabalhando',
+  ON_BREAK: 'em_intervalo',
+};
+
+const ENTRY_TYPES = {
+  CLOCK_IN: 'Entrada',
+  BREAK_START: 'Início do Intervalo',
+  BREAK_END: 'Fim do Intervalo',
+  CLOCK_OUT: 'Saída',
+}
 
 function App() {
-  const [message, setMessage] = useState("Pronto para registrar o ponto.");
-  const [location, setLocation] = useState(null);
+  const [user, setUser] = useState(null);
+  const [timeHistory, setTimeHistory] = useState([]);
+  const [userStatus, setUserStatus] = useState(STATUS.LOADING);
+  const [message, setMessage] = useState("Bem-vindo!");
   const [isLoading, setIsLoading] = useState(false);
-  const userId = 'funcionario-01';
 
-  const handleRegisterTime = () => {
-    setIsLoading(true);
-    setLocation(null);
-    setMessage("Obtendo sua localização, por favor aguarde...");
+  // Listener de Autenticação
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    return () => unsubscribe();
+  }, []);
 
-    if (!("geolocation" in navigator)) {
-      setMessage("Geolocalização não é suportada pelo seu navegador.");
-      setIsLoading(false);
+  // Listener de Histórico e Status
+  useEffect(() => {
+    if (!user) {
+      setUserStatus(STATUS.CLOCKED_OUT);
+      setTimeHistory([]);
       return;
     }
+    const q = query(collection(db, "timeEntries"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setTimeHistory(entries);
+      
+      // Determina o status atual com base no último registro
+      if (entries.length === 0) {
+        setUserStatus(STATUS.CLOCKED_OUT);
+      } else {
+        const lastEntryType = entries[0].type;
+        if (lastEntryType === ENTRY_TYPES.CLOCK_IN || lastEntryType === ENTRY_TYPES.BREAK_END) {
+          setUserStatus(STATUS.WORKING);
+        } else if (lastEntryType === ENTRY_TYPES.BREAK_START) {
+          setUserStatus(STATUS.ON_BREAK);
+        } else if (lastEntryType === ENTRY_TYPES.CLOCK_OUT) {
+          setUserStatus(STATUS.CLOCKED_OUT);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
 
+  const handleRegister = (entryType) => {
+    setIsLoading(true);
+    setMessage("Obtendo localização...");
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        const userLocation = { lat: latitude, lon: longitude };
-
-        setLocation(userLocation);
-        setMessage("Localização obtida. Validando com o servidor...");
-        sendDataToServer(userLocation);
+        setMessage("Validando com o servidor...");
+        sendDataToServer({ lat: latitude, lon: longitude }, entryType);
       },
       (error) => {
-        let errorMessage = "Ocorreu um erro ao obter a localização.";
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage = "Você negou a permissão para acessar a localização.";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage = "Informações de localização não estão disponíveis.";
-            break;
-          case error.TIMEOUT:
-            errorMessage = "A solicitação para obter a localização expirou.";
-            break;
-        }
-        setMessage(errorMessage);
+        setMessage("Erro ao obter localização.");
         setIsLoading(false);
       }
     );
   };
 
-  const sendDataToServer = async (userLocation) => {
+  const sendDataToServer = async (location, type) => {
     try {
+      const token = await user.getIdToken();
       const response = await fetch('http://localhost:3001/api/clock-in', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId, location: userLocation }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ location, type }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Erro do servidor.');
-      }
-
+      if (!response.ok) throw new Error(data.error);
       setMessage(`✅ ${data.success}`);
     } catch (error) {
       setMessage(`❌ Erro: ${error.message}`);
@@ -69,29 +95,56 @@ function App() {
     }
   };
 
+  const renderActionButtons = () => {
+    if (isLoading) {
+      return <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">Aguarde...</button>;
+    }
+
+    switch (userStatus) {
+      case STATUS.CLOCKED_OUT:
+        return <button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_IN)} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg">▶️ Iniciar Expediente</button>;
+      case STATUS.WORKING:
+        return (
+          <div className="flex gap-4">
+            <button onClick={() => handleRegister(ENTRY_TYPES.BREAK_START)} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-lg">⏸️ Iniciar Intervalo</button>
+            <button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_OUT)} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg">⏹️ Encerrar Expediente</button>
+          </div>
+        );
+      case STATUS.ON_BREAK:
+        return <button onClick={() => handleRegister(ENTRY_TYPES.BREAK_END)} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg">▶️ Retornar do Intervalo</button>;
+      default:
+        return <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">Carregando status...</button>;
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 text-center p-4">
-      <h1 className="text-3xl font-bold text-gray-800 mb-4">
-        Ponto Eletrônico
-      </h1>
+      <h1 className="text-4xl font-bold text-gray-800 mb-6">Ponto Eletrônico</h1>
+      
+      {!user ? <Auth /> : (
+        <div className="w-full max-w-md">
+          <div className="p-6 bg-white rounded-lg shadow-lg">
+            <p className="mb-2">Bem-vindo, {user.email}!</p>
+            <p className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-gray-50 rounded-lg">{message}</p>
+            <div className="space-y-4">
+              {renderActionButtons()}
+            </div>
+            <button onClick={() => signOut(auth)} className="mt-6 text-sm text-gray-600 hover:text-red-500">Sair</button>
+          </div>
 
-      <p className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-white rounded-lg shadow w-full max-w-sm">
-        {message}
-      </p>
-
-      <button
-        onClick={handleRegisterTime}
-        disabled={isLoading}
-        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out disabled:bg-gray-400 disabled:cursor-not-allowed"
-      >
-        {isLoading ? 'Registrando...' : 'Registrar Ponto'}
-      </button>
-
-      {location && (
-        <div className="mt-6 p-4 bg-green-100 border border-green-400 text-green-800 rounded-lg shadow">
-          <h2 className="font-bold">Coordenadas Capturadas:</h2>
-          <p>Latitude: {location.lat}</p>
-          <p>Longitude: {location.lon}</p>
+          {timeHistory.length > 0 && (
+            <div className="mt-8 w-full">
+              <h2 className="text-2xl font-bold mb-4">Seu Histórico Recente</h2>
+              <ul className="bg-white rounded-lg shadow-lg text-left overflow-hidden">
+                {timeHistory.map((entry) => (
+                  <li key={entry.id} className="p-4 border-b border-gray-200 last:border-b-0 flex justify-between items-center">
+                    <span className="font-semibold text-gray-700">{entry.type}</span>
+                    <span className="text-sm text-gray-500">{entry.timestamp.toDate().toLocaleString('pt-BR')}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
