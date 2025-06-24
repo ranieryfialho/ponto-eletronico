@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { auth } from '../firebase-config';
+import { toast } from 'react-toastify';
 
 export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
   const [displayName, setDisplayName] = useState('');
@@ -25,22 +26,18 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
         setDisplayName(user.displayName || '');
         setEmail(user.email || '');
         setError('');
-
         try {
           const token = await auth.currentUser.getIdToken();
           const response = await fetch(`http://localhost:3001/api/admin/employees/${user.uid}`, {
             headers: { 'Authorization': `Bearer ${token}` },
           });
-          if (!response.ok) throw new Error('Falha ao buscar perfil do funcionário.');
-          
+          if (!response.ok) throw new Error('Falha ao buscar perfil.');
           const profileData = await response.json();
-
           setCpf(profileData.cpf || '');
           setCargo(profileData.cargo || '');
           if (profileData.workHours) {
             setWorkHours(profileData.workHours);
           } else {
-            // Reseta para o padrão se não houver dados
              setWorkHours({ entry: '08:00', breakStart: '12:00', breakEnd: '13:00', exit: '18:00' });
           }
         } catch (err) {
@@ -71,10 +68,11 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      
+      toast.success("Perfil do funcionário atualizado!");
       onSuccess();
     } catch (err) {
       setError(err.message);
+      toast.error(err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -86,15 +84,15 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
       <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
       <div className="fixed inset-0 flex w-screen items-center justify-center p-4">
-        <Dialog.Panel className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl transition-all">
+        <Dialog.Panel className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
           <Dialog.Title className="text-xl font-bold text-gray-800">Editar Perfil do Funcionário</Dialog.Title>
-          
+          <p className="mt-1 text-sm text-gray-500">Altere os dados do funcionário abaixo.</p>
           {isLoading ? <p className="mt-4 text-center">Carregando perfil...</p> : (
-            <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="displayName" className="block text-sm font-medium text-gray-700">Nome Completo</label>
-                  <input id="displayName" type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                  <input id="displayName" type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
                 </div>
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">E-mail</label>
@@ -109,7 +107,6 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                   <input id="cargo" type="text" placeholder="Ex: Professor(a)" value={cargo} onChange={(e) => setCargo(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
                 </div>
               </div>
-
               <div className="pt-4 border-t">
                 <h3 className="text-md font-semibold text-gray-700">Jornada de Trabalho Padrão</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
@@ -131,7 +128,6 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                   </div>
                 </div>
               </div>
-
               {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
               <div className="flex justify-end gap-4 pt-4">
                 <button type="button" onClick={onClose} className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-200">Cancelar</button>
