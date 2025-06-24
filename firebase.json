@@ -1,12 +1,22 @@
 {
+  "functions": [
+    {
+      "source": "functions",
+      "runtime": "nodejs20"
+    }
+  ],
   "hosting": {
-    "public": "dist",
+    "public": "frontend/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/**",
+        "function": "api"
+      },
       {
         "source": "**",
         "destination": "/index.html"

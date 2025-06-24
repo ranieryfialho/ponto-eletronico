@@ -1,14 +1,14 @@
-// src/components/ReportView.jsx (Código Completo com a Correção do PDF)
+// src/components/ReportView.jsx (Completo e com fetch relativo)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable'; // MUDANÇA 1: A forma de importar a biblioteca da tabela
+import autoTable from 'jspdf-autotable';
 
 const formatMillisToHours = (millis) => {
   if (isNaN(millis) || millis < 0) return '00:00';
-  const totalMinutes = Math.floor(millis / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
+  const totalSeconds = Math.floor(millis / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
@@ -28,6 +28,7 @@ export function ReportView({ user, onBack }) {
       setIsLoading(true);
       try {
         const token = await auth.currentUser.getIdToken();
+        // MUDANÇA AQUI
         const response = await fetch(`/api/admin/employees/${user.uid}`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
@@ -49,6 +50,7 @@ export function ReportView({ user, onBack }) {
     setReportData(null);
     try {
       const token = await auth.currentUser.getIdToken();
+      // MUDANÇA AQUI
       const response = await fetch(`/api/admin/reports/time-entries?userId=${user.uid}&startDate=${startDate}&endDate=${endDate}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -127,14 +129,7 @@ export function ReportView({ user, onBack }) {
       tableData.push([{ content: `Total em Intervalo: ${formatMillisToHours(data.totalBreakMillis)}`, colSpan: 3, styles: { fontStyle: 'italic', halign: 'right' } }]);
     }
     
-    // MUDANÇA 2: A forma de chamar a função que cria a tabela
-    autoTable(doc, {
-      startY: 45,
-      head: tableHeaders,
-      body: tableData,
-      theme: 'grid',
-    });
-
+    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'grid' });
     doc.save(fileName);
   };
   

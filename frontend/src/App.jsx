@@ -88,7 +88,7 @@ function App() {
   const sendDataToServer = async (location, type) => {
     try {
       const token = await user.getIdToken();
-      const response = await fetch('http://localhost:3001/api/clock-in', {
+      const response = await fetch('/api/clock-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ location, type }),
