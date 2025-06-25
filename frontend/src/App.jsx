@@ -5,6 +5,7 @@ import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestor
 import { Auth } from './components/Auth';
 import { AdminPanel } from './components/AdminPanel';
 import { ToastContainer } from 'react-toastify';
+import { Footer } from './components/Footer';
 import 'react-toastify/dist/ReactToastify.css';
 
 const STATUS = {
@@ -135,7 +136,7 @@ function App() {
     return (
       <div className="w-full max-w-md">
         <div className="p-6 bg-white rounded-lg shadow-lg">
-          <p className="mb-2">Bem-vindo, {user.displayName || user.email}!</p>
+          <p className="mb-2">Bem-vindo, {user.displayName || user.email}! 👋</p>
           {isAdmin && (
             <button
               onClick={() => setShowAdminPanel(true)}
@@ -186,8 +187,11 @@ function App() {
         theme="light"
       />
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 text-center p-4">
-        <h1 className="text-4xl font-bold text-gray-800 mb-6">Ponto Eletrônico</h1>
-        {!user ? <Auth /> : renderMainContent()}
+        <div className="flex-grow flex flex-col items-center justify-center w-full">
+          <h1 className="text-4xl font-bold text-gray-800 mb-6">Ponto Eletrônico</h1>
+          {!user ? <Auth /> : renderMainContent()}
+        </div>
+        <Footer />
       </div>
     </>
   );

@@ -1,4 +1,3 @@
-// src/components/ReportView.jsx (Completo e com fetch relativo)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import jsPDF from 'jspdf';
@@ -28,7 +27,6 @@ export function ReportView({ user, onBack }) {
       setIsLoading(true);
       try {
         const token = await auth.currentUser.getIdToken();
-        // MUDANÇA AQUI
         const response = await fetch(`/api/admin/employees/${user.uid}`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
@@ -50,7 +48,6 @@ export function ReportView({ user, onBack }) {
     setReportData(null);
     try {
       const token = await auth.currentUser.getIdToken();
-      // MUDANÇA AQUI
       const response = await fetch(`/api/admin/reports/time-entries?userId=${user.uid}&startDate=${startDate}&endDate=${endDate}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -85,7 +82,7 @@ export function ReportView({ user, onBack }) {
 
   const handleExportCSV = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
-    const headers = ['Data', 'Tipo de Registro', 'Horário'];
+    const headers = ['Data', 'Tipo', 'Horário'];
     const csvRows = [headers.join(',')];
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
       data.punches.forEach(punch => { csvRows.push([date, `"${punch.type}"`, punch.time.toLocaleTimeString('pt-BR')].join(',')); });
@@ -120,22 +117,26 @@ export function ReportView({ user, onBack }) {
     doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 30);
     doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 36);
 
-    const tableData = []; const tableHeaders = [['Data', 'Tipo de Registro', 'Horário']];
+    const tableHeaders = [['Data', 'Entrada', 'Início Interv.', 'Fim Interv.', 'Saída', 'Total Trab.']];
+    const tableData = [];
     
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
-      tableData.push([{ content: `Marcações do dia ${date}`, colSpan: 3, styles: { fontStyle: 'bold', fillColor: '#f3f4f6' } }]);
-      data.punches.forEach(punch => { tableData.push([date, punch.type, punch.time.toLocaleTimeString('pt-BR')]); });
-      tableData.push([{ content: `Total Trabalhado: ${formatMillisToHours(data.totalWorkMillis)}`, colSpan: 3, styles: { fontStyle: 'italic', halign: 'right' } }]);
-      tableData.push([{ content: `Total em Intervalo: ${formatMillisToHours(data.totalBreakMillis)}`, colSpan: 3, styles: { fontStyle: 'italic', halign: 'right' } }]);
+      const entryTime = data.punches.find(p => p.type === 'Entrada')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
+      const breakStartTime = data.punches.find(p => p.type === 'Início do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
+      const breakEndTime = data.punches.find(p => p.type === 'Fim do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
+      const exitTime = data.punches.find(p => p.type === 'Saída')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
+      const totalWork = formatMillisToHours(data.totalWorkMillis);
+
+      tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
     }
     
-    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'grid' });
+    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
     doc.save(fileName);
   };
   
   const getPunchStatusColor = (punchType, punchTime) => {
-    const schedule = employeeProfile?.workHours;
-    if (!schedule) return 'text-gray-600';
+    if (!employeeProfile?.workHours) return 'text-gray-600';
+    const schedule = employeeProfile.workHours;
     const scheduleMap = { 'Entrada': schedule.entry, 'Início do Intervalo': schedule.breakStart, 'Fim do Intervalo': schedule.breakEnd, 'Saída': schedule.exit, };
     const scheduledTimeString = scheduleMap[punchType];
     if (!scheduledTimeString) return 'text-gray-600';
