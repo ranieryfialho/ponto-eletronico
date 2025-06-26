@@ -1,3 +1,4 @@
+// src/components/ReportView.jsx (Versão 100% Completa com Somatório e Assinaturas)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import jsPDF from 'jspdf';
@@ -59,6 +60,9 @@ export function ReportView({ user, onBack }) {
         acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) });
         return acc;
       }, {});
+      
+      let grandTotalWorkMillis = 0;
+      
       for (const date in entriesByDay) {
         let clockInTime = null, breakStartTime = null;
         entriesByDay[date].punches.forEach(entry => {
@@ -69,8 +73,12 @@ export function ReportView({ user, onBack }) {
           if (entry.type === 'Saída' && clockInTime) { entriesByDay[date].totalWorkMillis += entryTime - clockInTime; clockInTime = null; }
         });
         entriesByDay[date].totalWorkMillis -= entriesByDay[date].totalBreakMillis;
+        grandTotalWorkMillis += entriesByDay[date].totalWorkMillis;
       }
-      setReportData({ groupedEntries: entriesByDay });
+      setReportData({ 
+        groupedEntries: entriesByDay,
+        grandTotal: formatMillisToHours(grandTotalWorkMillis)
+      });
     } catch (err) { setError(err.message); } finally { setIsLoading(false); }
   }, [user, startDate, endDate, employeeProfile]);
 
@@ -126,11 +134,26 @@ export function ReportView({ user, onBack }) {
       const breakEndTime = data.punches.find(p => p.type === 'Fim do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const exitTime = data.punches.find(p => p.type === 'Saída')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const totalWork = formatMillisToHours(data.totalWorkMillis);
-
       tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
     }
     
     autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
+
+    let finalY = doc.lastAutoTable.finalY || 50;
+    if (finalY > 240) { doc.addPage(); finalY = 10; }
+    
+    doc.setFontSize(10);
+    doc.text('Total de Horas Trabalhadas no Período:', 14, finalY + 20);
+    doc.setFont(undefined, 'bold');
+    doc.text(reportData.grandTotal, 80, finalY + 20);
+    
+    doc.setFont(undefined, 'normal');
+    doc.text('_________________________', 14, finalY + 40);
+    doc.text('Assinatura do Colaborador', 20, finalY + 45);
+    
+    doc.text('_________________________', 110, finalY + 40);
+    doc.text('Assinatura do Diretor(a)', 118, finalY + 45);
+
     doc.save(fileName);
   };
   
@@ -176,34 +199,40 @@ export function ReportView({ user, onBack }) {
       {isLoading && <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Gerando relatório...</div>}
       
       {!isLoading && reportData && (
-        <div className="space-y-4">
-          {Object.keys(reportData.groupedEntries).length > 0 ? (
-            Object.entries(reportData.groupedEntries).map(([date, data]) => (
-              <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
-                <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                  <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-3xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
-                  <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-3xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
+        <>
+          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
+            <p className="text-md font-medium text-blue-800">Total de Horas Trabalhadas no Período Selecionado</p>
+            <p className="text-4xl font-bold text-blue-900 mt-1">{reportData.grandTotal}</p>
+          </div>
+          <div className="space-y-4">
+            {Object.keys(reportData.groupedEntries).length > 0 ? (
+              Object.entries(reportData.groupedEntries).map(([date, data]) => (
+                <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
+                  <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                    <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-3xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
+                    <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-3xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
+                  </div>
+                  <ul className="divide-y divide-gray-200">
+                    {data.punches.map(entry => {
+                      const timeColorClass = getPunchStatusColor(entry.type, entry.time);
+                      return (
+                        <li key={entry.id} className="py-2 flex justify-between items-center">
+                          <span className="font-medium text-gray-800">{entry.type}</span>
+                          <span className={`font-mono text-lg ${timeColorClass}`}>
+                            {entry.time.toLocaleTimeString('pt-BR')}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-                <ul className="divide-y divide-gray-200">
-                  {data.punches.map(entry => {
-                    const timeColorClass = getPunchStatusColor(entry.type, entry.time);
-                    return (
-                      <li key={entry.id} className="py-2 flex justify-between items-center">
-                        <span className="font-medium text-gray-800">{entry.type}</span>
-                        <span className={`font-mono text-lg ${timeColorClass}`}>
-                          {entry.time.toLocaleTimeString('pt-BR')}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          ) : (
-            <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200 text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
-          )}
-        </div>
+              ))
+            ) : (
+              <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200 text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
