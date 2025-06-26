@@ -51,6 +51,7 @@ Um sistema de ponto eletrônico full-stack desenvolvido para registrar a jornada
 
 ## 📁 Estrutura do Projeto
 
+```
 ponto-eletronico/
 ├── frontend/         # Código da aplicação React
 │   ├── src/
@@ -60,6 +61,7 @@ ponto-eletronico/
 │   └── package.json
 ├── firebase.json     # Arquivo principal de configuração do Firebase
 └── .firebaserc       # Aponta para o ID do seu projeto Firebase
+```
 
 ## ⚙️ Configuração e Instalação Local
 
