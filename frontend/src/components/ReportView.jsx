@@ -1,4 +1,4 @@
-// src/components/ReportView.jsx (Versão 100% Completa com Somatório e Assinaturas)
+// src/components/ReportView.jsx (Versão Final com Layout Flexbox Corrigido)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import jsPDF from 'jspdf';
@@ -28,9 +28,7 @@ export function ReportView({ user, onBack }) {
       setIsLoading(true);
       try {
         const token = await auth.currentUser.getIdToken();
-        const response = await fetch(`/api/admin/employees/${user.uid}`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const response = await fetch(`/api/admin/employees/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!response.ok) throw new Error('Falha ao buscar perfil.');
         const profileData = await response.json();
         setEmployeeProfile(profileData);
@@ -49,9 +47,7 @@ export function ReportView({ user, onBack }) {
     setReportData(null);
     try {
       const token = await auth.currentUser.getIdToken();
-      const response = await fetch(`/api/admin/reports/time-entries?userId=${user.uid}&startDate=${startDate}&endDate=${endDate}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+      const response = await fetch(`/api/admin/reports/time-entries?userId=${user.uid}&startDate=${startDate}&endDate=${endDate}`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!response.ok) { const data = await response.json(); throw new Error(data.error || 'Falha ao buscar dados.'); }
       const entries = await response.json();
       const entriesByDay = entries.reduce((acc, entry) => {
@@ -60,9 +56,7 @@ export function ReportView({ user, onBack }) {
         acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) });
         return acc;
       }, {});
-      
       let grandTotalWorkMillis = 0;
-      
       for (const date in entriesByDay) {
         let clockInTime = null, breakStartTime = null;
         entriesByDay[date].punches.forEach(entry => {
@@ -75,22 +69,17 @@ export function ReportView({ user, onBack }) {
         entriesByDay[date].totalWorkMillis -= entriesByDay[date].totalBreakMillis;
         grandTotalWorkMillis += entriesByDay[date].totalWorkMillis;
       }
-      setReportData({ 
-        groupedEntries: entriesByDay,
-        grandTotal: formatMillisToHours(grandTotalWorkMillis)
-      });
+      setReportData({ groupedEntries: entriesByDay, grandTotal: formatMillisToHours(grandTotalWorkMillis) });
     } catch (err) { setError(err.message); } finally { setIsLoading(false); }
   }, [user, startDate, endDate, employeeProfile]);
 
   useEffect(() => {
-    if (employeeProfile) {
-      handleGenerateReport();
-    }
+    if (employeeProfile) { handleGenerateReport(); }
   }, [employeeProfile, handleGenerateReport]);
 
   const handleExportCSV = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
-    const headers = ['Data', 'Tipo', 'Horário'];
+    const headers = ['Data', 'Tipo de Registro', 'Horário'];
     const csvRows = [headers.join(',')];
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
       data.punches.forEach(punch => { csvRows.push([date, `"${punch.type}"`, punch.time.toLocaleTimeString('pt-BR')].join(',')); });
@@ -119,15 +108,12 @@ export function ReportView({ user, onBack }) {
     const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, '_');
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`;
-
     doc.setFontSize(18); doc.text('Relatório de Ponto', 14, 22);
     doc.setFontSize(11); doc.setTextColor(100);
     doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 30);
     doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 36);
-
     const tableHeaders = [['Data', 'Entrada', 'Início Interv.', 'Fim Interv.', 'Saída', 'Total Trab.']];
     const tableData = [];
-    
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
       const entryTime = data.punches.find(p => p.type === 'Entrada')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const breakStartTime = data.punches.find(p => p.type === 'Início do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
@@ -136,24 +122,18 @@ export function ReportView({ user, onBack }) {
       const totalWork = formatMillisToHours(data.totalWorkMillis);
       tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
     }
-    
     autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
-
     let finalY = doc.lastAutoTable.finalY || 50;
     if (finalY > 240) { doc.addPage(); finalY = 10; }
-    
     doc.setFontSize(10);
     doc.text('Total de Horas Trabalhadas no Período:', 14, finalY + 20);
     doc.setFont(undefined, 'bold');
     doc.text(reportData.grandTotal, 80, finalY + 20);
-    
     doc.setFont(undefined, 'normal');
     doc.text('_________________________', 14, finalY + 40);
     doc.text('Assinatura do Colaborador', 20, finalY + 45);
-    
     doc.text('_________________________', 110, finalY + 40);
     doc.text('Assinatura do Diretor(a)', 118, finalY + 45);
-
     doc.save(fileName);
   };
   
@@ -185,13 +165,35 @@ export function ReportView({ user, onBack }) {
         </button>
       </div>
 
+      {/* ===== SEÇÃO DE FILTROS COM LAYOUT CORRIGIDO ===== */}
       <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-          <div className="md:col-span-1"><label htmlFor="start-date" className="block text-sm font-medium text-gray-700">Data de Início</label><input id="start-date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" /></div>
-          <div className="md:col-span-1"><label htmlFor="end-date" className="block text-sm font-medium text-gray-700">Data de Fim</label><input id="end-date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" /></div>
-          <button onClick={handleGenerateReport} disabled={isLoading} className="md:col-span-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md h-11">{isLoading ? 'Gerando...' : 'Gerar Relatório'}</button>
-          <button onClick={handleExportCSV} disabled={!reportData || isLoading} className="md:col-span-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Excel</button>
-          <button onClick={handleExportPDF} disabled={!reportData || isLoading} className="md:col-span-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>PDF</button>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          {/* Grupo de Datas à Esquerda */}
+          <div className="flex items-end gap-4">
+            <div>
+              <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 text-left">Data de Início</label>
+              <input id="start-date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+            </div>
+            <div>
+              <label htmlFor="end-date" className="block text-sm font-medium text-gray-700 text-left">Data de Fim</label>
+              <input id="end-date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+            </div>
+          </div>
+          
+          {/* Grupo de Botões à Direita */}
+          <div className="flex items-center gap-2">
+            <button onClick={handleGenerateReport} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md h-11">
+              {isLoading ? 'Gerando...' : 'Gerar Relatório'}
+            </button>
+            <button onClick={handleExportCSV} disabled={!reportData || isLoading} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Excel
+            </button>
+            <button onClick={handleExportPDF} disabled={!reportData || isLoading} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              PDF
+            </button>
+          </div>
         </div>
         {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
       </div>
@@ -199,40 +201,36 @@ export function ReportView({ user, onBack }) {
       {isLoading && <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Gerando relatório...</div>}
       
       {!isLoading && reportData && (
-        <>
+        <div className="space-y-4">
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
             <p className="text-md font-medium text-blue-800">Total de Horas Trabalhadas no Período Selecionado</p>
             <p className="text-4xl font-bold text-blue-900 mt-1">{reportData.grandTotal}</p>
           </div>
-          <div className="space-y-4">
-            {Object.keys(reportData.groupedEntries).length > 0 ? (
-              Object.entries(reportData.groupedEntries).map(([date, data]) => (
-                <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
-                  <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                    <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-3xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
-                    <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-3xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
-                  </div>
-                  <ul className="divide-y divide-gray-200">
-                    {data.punches.map(entry => {
-                      const timeColorClass = getPunchStatusColor(entry.type, entry.time);
-                      return (
-                        <li key={entry.id} className="py-2 flex justify-between items-center">
-                          <span className="font-medium text-gray-800">{entry.type}</span>
-                          <span className={`font-mono text-lg ${timeColorClass}`}>
-                            {entry.time.toLocaleTimeString('pt-BR')}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
+          {Object.keys(reportData.groupedEntries).length > 0 ? (
+            Object.entries(reportData.groupedEntries).map(([date, data]) => (
+              <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
+                <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-3xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
+                  <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-3xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
                 </div>
-              ))
-            ) : (
-              <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200 text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
-            )}
-          </div>
-        </>
+                <ul className="divide-y divide-gray-200">
+                  {data.punches.map(entry => {
+                    const timeColorClass = getPunchStatusColor(entry.type, entry.time);
+                    return (
+                      <li key={entry.id} className="py-2 flex justify-between items-center">
+                        <span className="font-medium text-gray-800">{entry.type}</span>
+                        <span className={`font-mono text-lg ${timeColorClass}`}>{entry.time.toLocaleTimeString('pt-BR')}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          ) : (
+            <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200 text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
+          )}
+        </div>
       )}
     </div>
   );
