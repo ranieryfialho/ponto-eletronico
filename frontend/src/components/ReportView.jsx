@@ -1,4 +1,3 @@
-// src/components/ReportView.jsx (Versão Final com Layout Flexbox Corrigido)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import jsPDF from 'jspdf';
@@ -165,10 +164,8 @@ export function ReportView({ user, onBack }) {
         </button>
       </div>
 
-      {/* ===== SEÇÃO DE FILTROS COM LAYOUT CORRIGIDO ===== */}
       <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          {/* Grupo de Datas à Esquerda */}
           <div className="flex items-end gap-4">
             <div>
               <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 text-left">Data de Início</label>
@@ -179,8 +176,7 @@ export function ReportView({ user, onBack }) {
               <input id="end-date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
             </div>
           </div>
-          
-          {/* Grupo de Botões à Direita */}
+
           <div className="flex items-center gap-2">
             <button onClick={handleGenerateReport} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md h-11">
               {isLoading ? 'Gerando...' : 'Gerar Relatório'}
