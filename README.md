@@ -2,10 +2,6 @@
 
 Um sistema de ponto eletrônico full-stack desenvolvido para registrar a jornada de trabalho de funcionários com validação por geolocalização. A aplicação conta com um painel administrativo completo para gestão de funcionários, sistema de aprovação de ponto e geração de relatórios detalhados com exportação para PDF e CSV.
 
-Este projeto foi construído de forma guiada, demonstrando um fluxo de desenvolvimento completo, desde a concepção e prototipagem até o deploy em um ambiente de produção na nuvem.
-
-**[Acesse a aplicação ao vivo](https://ponto-eletronico-senior-81a53.web.app)** *(Substitua pelo link do seu projeto)*
-
 ---
 
 ## ✨ Funcionalidades
