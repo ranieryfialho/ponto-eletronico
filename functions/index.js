@@ -178,9 +178,7 @@ app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (r
     const pendingQuery = db.collection('timeEntries')
       .where('status', '==', 'pendente_aprovacao')
       .orderBy('timestamp', 'asc');
-
     const snapshot = await pendingQuery.get();
-
     const entries = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
@@ -189,7 +187,6 @@ app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (r
         timestamp: data.timestamp.toDate().toISOString(),
       };
     });
-
     res.status(200).json(entries);
   } catch (error) {
     console.error("Erro ao buscar registros pendentes:", error);
@@ -211,8 +208,15 @@ app.post('/api/admin/entries/:entryId/approve', verifyFirebaseToken, verifyAdmin
 app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const { entryId } = req.params;
-    await db.collection('timeEntries').doc(entryId).delete();
-    res.status(200).json({ success: 'Registro de ponto rejeitado e removido.' });
+    const { reason } = req.body;
+    if (!reason) {
+      return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' });
+    }
+    await db.collection('timeEntries').doc(entryId).update({ 
+      status: 'rejeitado',
+      rejectionReason: reason 
+    });
+    res.status(200).json({ success: 'Registro de ponto rejeitado com sucesso.' });
   } catch (error) {
     console.error("Erro ao rejeitar registro:", error);
     res.status(500).json({ error: 'Erro interno ao rejeitar registro.' });
