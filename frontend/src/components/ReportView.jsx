@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
+import { toast } from 'react-toastify';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -15,29 +16,30 @@ export function ReportView({ user, onBack }) {
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  
+
   const [reportData, setReportData] = useState(null);
   const [employeeProfile, setEmployeeProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) return;
-      setIsLoading(true);
-      try {
-        const token = await auth.currentUser.getIdToken();
-        const response = await fetch(`/api/admin/employees/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
-        if (!response.ok) throw new Error('Falha ao buscar perfil.');
-        const profileData = await response.json();
-        setEmployeeProfile(profileData);
-      } catch (err) {
-        setError('Não foi possível carregar os dados do perfil. ' + err.message);
-        setIsLoading(false); 
-      }
-    };
-    fetchProfile();
+  const fetchProfile = useCallback(async () => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch(`/api/admin/employees/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!response.ok) throw new Error('Falha ao buscar perfil.');
+      const profileData = await response.json();
+      setEmployeeProfile(profileData);
+    } catch (err) {
+      setError('Não foi possível carregar os dados do perfil. ' + err.message);
+      setIsLoading(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   const handleGenerateReport = useCallback(async () => {
     if (!user || !startDate || !endDate || !employeeProfile) return;
@@ -55,10 +57,13 @@ export function ReportView({ user, onBack }) {
         acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) });
         return acc;
       }, {});
+
       let grandTotalWorkMillis = 0;
+
       for (const date in entriesByDay) {
         let clockInTime = null, breakStartTime = null;
         entriesByDay[date].punches.forEach(entry => {
+          if (entry.status === 'rejeitado') return;
           const entryTime = entry.time;
           if (entry.type === 'Entrada') clockInTime = entryTime;
           if (entry.type === 'Início do Intervalo') breakStartTime = entryTime;
@@ -73,15 +78,26 @@ export function ReportView({ user, onBack }) {
   }, [user, startDate, endDate, employeeProfile]);
 
   useEffect(() => {
-    if (employeeProfile) { handleGenerateReport(); }
+    if (employeeProfile) {
+      handleGenerateReport();
+    }
   }, [employeeProfile, handleGenerateReport]);
+
+  const handleShowOnMap = (location) => {
+    if (location && location.lat && location.lon) {
+      const url = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lon}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      toast.error("Coordenadas não encontradas para este registro.");
+    }
+  };
 
   const handleExportCSV = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
-    const headers = ['Data', 'Tipo de Registro', 'Horário'];
+    const headers = ['Data', 'Tipo de Registro', 'Horário', 'Latitude', 'Longitude'];
     const csvRows = [headers.join(',')];
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
-      data.punches.forEach(punch => { csvRows.push([date, `"${punch.type}"`, punch.time.toLocaleTimeString('pt-BR')].join(',')); });
+      data.punches.forEach(punch => { csvRows.push([date, `"${punch.type}"`, punch.time.toLocaleTimeString('pt-BR'), punch.location?.lat || '', punch.location?.lon || ''].join(',')); });
       csvRows.push([`"Total Trabalhado (${date})"`, `"${formatMillisToHours(data.totalWorkMillis)}"`]);
       csvRows.push([`"Total em Intervalo (${date})"`, `"${formatMillisToHours(data.totalBreakMillis)}"`]);
       csvRows.push([]);
@@ -99,12 +115,12 @@ export function ReportView({ user, onBack }) {
     link.click();
     document.body.removeChild(link);
   };
-  
+
   const handleExportPDF = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
     const doc = new jsPDF();
-    const formattedStartDate = new Date(startDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
-    const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
+    const formattedStartDate = new Date(startDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, '_');
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`;
     doc.setFontSize(18); doc.text('Relatório de Ponto', 14, 22);
@@ -121,7 +137,7 @@ export function ReportView({ user, onBack }) {
       const totalWork = formatMillisToHours(data.totalWorkMillis);
       tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
     }
-    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
+    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] } });
     let finalY = doc.lastAutoTable.finalY || 50;
     if (finalY > 240) { doc.addPage(); finalY = 10; }
     doc.setFontSize(10);
@@ -135,7 +151,7 @@ export function ReportView({ user, onBack }) {
     doc.text('Assinatura do Diretor(a)', 118, finalY + 45);
     doc.save(fileName);
   };
-  
+
   const getPunchStatusColor = (punchType, punchTime) => {
     if (!employeeProfile?.workHours) return 'text-gray-600';
     const schedule = employeeProfile.workHours;
@@ -147,13 +163,13 @@ export function ReportView({ user, onBack }) {
     scheduledTime.setHours(hours, minutes, 0, 0);
     const diffMinutes = (punchTime.getTime() - scheduledTime.getTime()) / 60000;
     const tolerance = 10;
-    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; } 
+    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; }
     else { return 'text-red-600 font-semibold'; }
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
-       <div className="flex justify-between items-center flex-wrap gap-4">
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Relatório de Ponto</h1>
           <p className="text-gray-500">{user.displayName || user.email}</p>
@@ -176,18 +192,15 @@ export function ReportView({ user, onBack }) {
               <input id="end-date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
             </div>
           </div>
-
           <div className="flex items-center gap-2">
             <button onClick={handleGenerateReport} disabled={isLoading} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md h-11">
               {isLoading ? 'Gerando...' : 'Gerar Relatório'}
             </button>
             <button onClick={handleExportCSV} disabled={!reportData || isLoading} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Excel
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>Excel
             </button>
             <button onClick={handleExportPDF} disabled={!reportData || isLoading} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md h-11 flex items-center justify-center gap-2 disabled:bg-gray-400">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              PDF
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>PDF
             </button>
           </div>
         </div>
@@ -195,7 +208,7 @@ export function ReportView({ user, onBack }) {
       </div>
 
       {isLoading && <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Gerando relatório...</div>}
-      
+
       {!isLoading && reportData && (
         <div className="space-y-4">
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
@@ -213,10 +226,25 @@ export function ReportView({ user, onBack }) {
                 <ul className="divide-y divide-gray-200">
                   {data.punches.map(entry => {
                     const timeColorClass = getPunchStatusColor(entry.type, entry.time);
+                    const isRejected = entry.status === 'rejeitado';
                     return (
-                      <li key={entry.id} className="py-2 flex justify-between items-center">
-                        <span className="font-medium text-gray-800">{entry.type}</span>
-                        <span className={`font-mono text-lg ${timeColorClass}`}>{entry.time.toLocaleTimeString('pt-BR')}</span>
+                      <li key={entry.id} className={`py-3 flex justify-between items-center ${isRejected ? 'bg-red-50 rounded-md' : ''}`}>
+                        <span className={`font-medium text-gray-800 ${isRejected ? 'line-through' : ''}`}>{entry.type}</span>
+                        <div className="flex items-center gap-4">
+                          <button
+                            onClick={() => handleShowOnMap(entry.location)}
+                            title="Ver localização no mapa"
+                            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                          </button>
+                          <span className={`font-mono text-lg ${isRejected ? 'text-red-600 line-through' : timeColorClass}`}>
+                            {entry.time.toLocaleTimeString('pt-BR')}
+                          </span>
+                        </div>
                       </li>
                     );
                   })}
