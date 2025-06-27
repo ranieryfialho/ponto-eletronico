@@ -118,7 +118,7 @@ function App() {
     return (
       <div className="w-full max-w-md">
         <div className="p-6 bg-white rounded-lg shadow-lg">
-          <p className="mb-2 capitalize">Bem-vindo, {user.displayName || user.email}! 👋</p>
+          <p className="mb-4 capitalize text-lg md:text-xl text-center font-bold text-gray-800">Bem-vindo, {user.displayName || user.email}! 👋</p>
           {isAdmin && (<button onClick={() => setShowAdminPanel(true)} className="w-full mb-4 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">Painel do Administrador</button>)}
           <p className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-gray-50 rounded-lg">{message}</p>
           <div className="space-y-4">{renderActionButtons()}</div>
