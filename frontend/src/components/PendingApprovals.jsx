@@ -63,7 +63,7 @@ export function PendingApprovals() {
               <div>
                 <p className="font-bold text-gray-800">{entry.displayName}</p>
                 <p className="text-sm text-gray-600">
-                  Tentativa de <span className="font-semibold">{entry.type}</span> em {new Date(entry.timestamp.seconds * 1000).toLocaleString('pt-BR')}
+                  Tentativa de <span className="font-semibold">{entry.type}</span> em {new Date(entry.timestamp).toLocaleString('pt-BR')}
                 </p>
               </div>
               <div className="flex gap-2 shrink-0">

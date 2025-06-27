@@ -1,4 +1,4 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions'); 
 const express = require('express');
 const cors = require('cors');
 const { db, admin } = require('./firebase-config.js');
@@ -7,7 +7,6 @@ const { getDistanceInMeters } = require('./haversine.js');
 const app = express();
 
 app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
-
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
@@ -31,22 +30,7 @@ const verifyAdmin = (req, res, next) => {
   return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
 };
 
-
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const { location, type } = req.body;
-    const requestIp = req.ip;
-    const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
-    if (distance > ALLOWED_RADIUS_METERS) { return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` }); }
-    const timeRecord = { userId: userId, timestamp: new Date(), location: location, type: type, validatedIp: requestIp, };
-    await db.collection('timeEntries').add(timeRecord);
-    res.status(201).json({ success: `Registro de '${type}' realizado com sucesso!` });
-  } catch (error) {
-    console.error("Erro no servidor ao registrar ponto:", error);
-    res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
-  }
-}); app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const { location, type } = req.body;
@@ -63,19 +47,22 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     if (type === 'Entrada') {
       const employeeDoc = await db.collection('employees').doc(userId).get();
-      if (employeeProfile.exists && employeeProfile.data().workHours) {
-        const schedule = employeeProfile.data().workHours;
+ 
+      if (employeeDoc.exists && employeeDoc.data().workHours) {
+        const schedule = employeeDoc.data().workHours;
+        
+        if (schedule.entry) {
+          const [hours, minutes] = schedule.entry.split(':');
+          const scheduledTime = new Date(now.getTime());
+          scheduledTime.setHours(hours, minutes, 0, 0);
 
-        const [hours, minutes] = schedule.entry.split(':');
-        const scheduledTime = new Date(now.getTime());
-        scheduledTime.setHours(hours, minutes, 0, 0);
+          const latenessMillis = now.getTime() - scheduledTime.getTime();
+          const latenessMinutes = Math.floor(latenessMillis / 60000);
 
-        const latenessMillis = now.getTime() - scheduledTime.getTime();
-        const latenessMinutes = Math.floor(latenessMillis / 60000);
-
-        if (latenessMinutes > 120) {
-          entryStatus = 'pendente_aprovacao';
-          successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
+          if (latenessMinutes > 120) {
+            entryStatus = 'pendente_aprovacao';
+            successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
+          }
         }
       }
     }
@@ -99,6 +86,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   }
 });
 
+// ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);
@@ -192,22 +180,27 @@ app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (r
       .orderBy('timestamp', 'asc');
 
     const snapshot = await pendingQuery.get();
-    const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    const entries = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        timestamp: data.timestamp.toDate().toISOString(),
+      };
+    });
 
     res.status(200).json(entries);
   } catch (error) {
-    console.error("DEBUG: Erro detalhado ao buscar pendências:", error);
-    res.status(500).json({ error: error.message || 'Ocorreu um erro sem mensagem detalhada.' });
+    console.error("Erro ao buscar registros pendentes:", error);
+    res.status(500).json({ error: error.message || 'Erro interno ao buscar registros pendentes.' });
   }
 });
 
 app.post('/api/admin/entries/:entryId/approve', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const { entryId } = req.params;
-    const entryRef = db.collection('timeEntries').doc(entryId);
-
-    await entryRef.update({ status: 'aprovado' });
-
+    await db.collection('timeEntries').doc(entryId).update({ status: 'aprovado' });
     res.status(200).json({ success: 'Registro de ponto aprovado com sucesso!' });
   } catch (error) {
     console.error("Erro ao aprovar registro:", error);
@@ -225,5 +218,6 @@ app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin,
     res.status(500).json({ error: 'Erro interno ao rejeitar registro.' });
   }
 });
+
 
 exports.api = functions.https.onRequest(app);
