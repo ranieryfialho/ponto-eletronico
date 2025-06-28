@@ -1,5 +1,3 @@
-// functions/index.js (Versão Final de Produção COMPLETA e CORRETA)
-
 const functions = require('firebase-functions'); 
 const express = require('express');
 const cors = require('cors');
@@ -9,11 +7,11 @@ const { getDistanceInMeters } = require('./haversine.js');
 const app = express();
 
 app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
-
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
 const ALLOWED_RADIUS_METERS = 500;
+const ALLOWED_IPS = ['::1', '127.0.0.1'];
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -33,15 +31,16 @@ const verifyAdmin = (req, res, next) => {
   return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
 };
 
-// --- ROTAS DA API COM /api EM TODAS ---
-
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const { location, type } = req.body;
     const requestIp = req.ip;
+    const now = new Date();
+
     const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
     if (distance > ALLOWED_RADIUS_METERS) { return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` }); }
+    if (!ALLOWED_IPS.includes(requestIp)) { return res.status(400).json({ error: 'Você não parece estar conectado na rede da escola.' }); }
     const timeRecord = { userId: userId, timestamp: new Date(), location: location, type: type, validatedIp: requestIp, };
     const docRef = await db.collection('timeEntries').add(timeRecord);
     res.status(201).json({ success: `Registro de '${type}' realizado com sucesso!`, docId: docRef.id });
@@ -51,6 +50,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   }
 });
 
+// ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);
@@ -136,5 +136,56 @@ app.get('/api/admin/reports/time-entries', verifyFirebaseToken, verifyAdmin, asy
     res.status(500).json({ error: 'Erro interno ao buscar registros.' });
   }
 });
+
+app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const pendingQuery = db.collection('timeEntries')
+      .where('status', '==', 'pendente_aprovacao')
+      .orderBy('timestamp', 'asc');
+    const snapshot = await pendingQuery.get();
+    const entries = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        timestamp: data.timestamp.toDate().toISOString(),
+      };
+    });
+    res.status(200).json(entries);
+  } catch (error) {
+    console.error("Erro ao buscar registros pendentes:", error);
+    res.status(500).json({ error: error.message || 'Erro interno ao buscar registros pendentes.' });
+  }
+});
+
+app.post('/api/admin/entries/:entryId/approve', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { entryId } = req.params;
+    await db.collection('timeEntries').doc(entryId).update({ status: 'aprovado' });
+    res.status(200).json({ success: 'Registro de ponto aprovado com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao aprovar registro:", error);
+    res.status(500).json({ error: 'Erro interno ao aprovar registro.' });
+  }
+});
+
+app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { entryId } = req.params;
+    const { reason } = req.body;
+    if (!reason) {
+      return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' });
+    }
+    await db.collection('timeEntries').doc(entryId).update({ 
+      status: 'rejeitado',
+      rejectionReason: reason 
+    });
+    res.status(200).json({ success: 'Registro de ponto rejeitado com sucesso.' });
+  } catch (error) {
+    console.error("Erro ao rejeitar registro:", error);
+    res.status(500).json({ error: 'Erro interno ao rejeitar registro.' });
+  }
+});
+
 
 exports.api = functions.https.onRequest(app);
