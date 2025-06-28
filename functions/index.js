@@ -33,7 +33,7 @@ const verifyAdmin = (req, res, next) => {
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { location, type } = req.body;
+    const { location, type, justification } = req.body; 
     const requestIp = req.ip;
     const now = new Date();
 
@@ -44,22 +44,25 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     let entryStatus = 'aprovado';
     let successMessage = `Registro de '${type}' realizado com sucesso!`;
+    let requiresJustification = false;
 
     if (type === 'Entrada') {
       const employeeDoc = await db.collection('employees').doc(userId).get();
- 
       if (employeeDoc.exists && employeeDoc.data().workHours) {
         const schedule = employeeDoc.data().workHours;
-        
         if (schedule.entry) {
           const [hours, minutes] = schedule.entry.split(':');
           const scheduledTime = new Date(now.getTime());
           scheduledTime.setHours(hours, minutes, 0, 0);
-
-          const latenessMillis = now.getTime() - scheduledTime.getTime();
-          const latenessMinutes = Math.floor(latenessMillis / 60000);
+          const latenessMinutes = Math.floor((now.getTime() - scheduledTime.getTime()) / 60000);
 
           if (latenessMinutes > 120) {
+            if (!justification) {
+              return res.status(422).json({ 
+                error: 'Justificativa necessária.',
+                requiresJustification: true 
+              });
+            }
             entryStatus = 'pendente_aprovacao';
             successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
           }
@@ -75,6 +78,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       type: type,
       validatedIp: requestIp,
       status: entryStatus,
+      justification: justification || null, // Salva a justificativa
     };
 
     await db.collection('timeEntries').add(timeRecord);

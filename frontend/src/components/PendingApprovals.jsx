@@ -1,3 +1,4 @@
+// src/components/PendingApprovals.jsx (Versão 100% Completa com Exibição da Justificativa)
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import { toast } from 'react-toastify';
@@ -93,17 +94,26 @@ export function PendingApprovals() {
         ) : (
           <ul className="divide-y divide-gray-200">
             {pendingEntries.map(entry => (
-              <li key={entry.id} className="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <p className="font-bold text-gray-800">{entry.displayName}</p>
-                  <p className="text-sm text-gray-600">
-                    Tentativa de <span className="font-semibold">{entry.type}</span> em {new Date(entry.timestamp).toLocaleString('pt-BR')}
-                  </p>
+              <li key={entry.id} className="py-4 flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <p className="font-bold text-gray-800">{entry.displayName}</p>
+                    <p className="text-sm text-gray-600">
+                      Tentativa de <span className="font-semibold">{entry.type}</span> em {new Date(entry.timestamp).toLocaleString('pt-BR')}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => handleApprove(entry.id)} className="bg-green-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-green-600">Aprovar</button>
+                    <button onClick={() => handleRejectClick(entry.id)} className="bg-red-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-red-600">Rejeitar</button>
+                  </div>
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => handleApprove(entry.id)} className="bg-green-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-green-600">Aprovar</button>
-                  <button onClick={() => handleRejectClick(entry.id)} className="bg-red-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-red-600">Rejeitar</button>
-                </div>
+                {/* ÁREA QUE EXIBE A JUSTIFICATIVA */}
+                {entry.justification && (
+                  <div className="p-3 bg-yellow-50 border-l-4 border-yellow-300">
+                    <p className="text-sm font-semibold text-yellow-800">Justificativa do Funcionário:</p>
+                    <p className="text-sm text-yellow-700 mt-1 italic">"{entry.justification}"</p>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

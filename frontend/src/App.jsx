@@ -1,3 +1,4 @@
+// src/App.jsx (Versão Final com Modal de Justificativa)
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -8,6 +9,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Footer } from './components/Footer';
 import { Disclosure, Transition } from '@headlessui/react';
+import { JustificationModal } from './components/JustificationModal'; // 1. Importar o novo modal
 
 const STATUS = { LOADING: 'carregando...', CLOCKED_OUT: 'fora_do_expediente', WORKING: 'trabalhando', ON_BREAK: 'em_intervalo' };
 const ENTRY_TYPES = { CLOCK_IN: 'Entrada', BREAK_START: 'Início do Intervalo', BREAK_END: 'Fim do Intervalo', CLOCK_OUT: 'Saída' };
@@ -20,6 +22,10 @@ function App() {
   const [userStatus, setUserStatus] = useState(STATUS.LOADING);
   const [message, setMessage] = useState("Bem-vindo!");
   const [isLoading, setIsLoading] = useState(false);
+
+  // 2. Estados para controlar o modal
+  const [isJustificationModalOpen, setIsJustificationModalOpen] = useState(false);
+  const [lateEntryLocation, setLateEntryLocation] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -77,30 +83,52 @@ function App() {
     );
   };
 
-  const sendDataToServer = async (location, type) => {
+  // 3. Lógica de registro ATUALIZADA para lidar com a justificativa
+  const sendDataToServer = async (location, type, justification = null) => {
+    setIsLoading(true);
     try {
       const token = await user.getIdToken();
       const response = await fetch('/api/clock-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ location, type }),
+        body: JSON.stringify({ location, type, justification }),
       });
       const data = await response.json();
+
+      if (response.status === 422 && data.requiresJustification) {
+        setLateEntryLocation(location);
+        setIsJustificationModalOpen(true);
+        // Mantém o isLoading ativo enquanto o modal estiver aberto
+        return; 
+      }
+
       if (!response.ok) throw new Error(data.error);
+      
       toast.success(data.success);
       setMessage(`✅ ${data.success}`);
     } catch (error) {
       toast.error(error.message);
       setMessage(`❌ Erro: ${error.message}`);
     } finally {
-      setIsLoading(false);
+      // Só para de carregar se o modal não for abrir
+      if (!isJustificationModalOpen) {
+        setIsLoading(false);
+      }
     }
+  };
+
+  // 4. Nova função para ser chamada pelo modal
+  const handleSubmitJustification = async (justification) => {
+    await sendDataToServer(lateEntryLocation, 'Entrada', justification);
+    setIsJustificationModalOpen(false);
+    setLateEntryLocation(null);
+    setIsLoading(false); // Agora para o carregamento
   };
 
   const handleLogout = () => { signOut(auth); };
 
   const renderActionButtons = () => {
-    if (isLoading) { return <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">Aguarde...</button>; }
+    if (isLoading) { return <button disabled className="w-full bg-gray-400 text-white font-bold py-2 px-3 md:py-3 md:px-6 rounded-lg">Aguarde...</button>; }
     switch (userStatus) {
       case STATUS.CLOCKED_OUT: return <button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_IN)} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 md:py-3 md:px-6 rounded-lg shadow-sm">▶️ Iniciar Expediente</button>;
       case STATUS.WORKING: return (<div className="flex gap-4"><button onClick={() => handleRegister(ENTRY_TYPES.BREAK_START)} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-3 md:py-3 md:px-6 rounded-lg shadow-sm">⏸️ Iniciar Intervalo</button><button onClick={() => handleRegister(ENTRY_TYPES.CLOCK_OUT)} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 md:py-3 md:px-6 rounded-lg shadow-sm">⏹️ Encerrar Expediente</button></div>);
@@ -149,12 +177,8 @@ function App() {
                                   return (
                                     <li key={entry.id} className={`px-3 py-2 border-b border-gray-100 last:border-b-0 ${isRejected ? 'bg-red-50' : ''}`}>
                                       <div className="flex justify-between items-center">
-                                        <span className={`font-medium text-gray-700 text-sm ${isRejected ? 'line-through text-red-500' : ''}`}>
-                                          {entry.type}
-                                        </span>
-                                        <span className={`text-sm text-gray-500 font-mono ${isRejected ? 'line-through text-red-500' : ''}`}>
-                                          {new Date(entry.timestamp.seconds * 1000).toLocaleTimeString('pt-BR')}
-                                        </span>
+                                        <span className={`font-medium text-gray-700 text-sm ${isRejected ? 'line-through text-red-500' : ''}`}>{entry.type}</span>
+                                        <span className={`text-sm text-gray-500 font-mono ${isRejected ? 'line-through text-red-500' : ''}`}>{new Date(entry.timestamp.seconds * 1000).toLocaleTimeString('pt-BR')}</span>
                                       </div>
                                       {isRejected && entry.rejectionReason && (
                                         <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
@@ -181,6 +205,11 @@ function App() {
   return (
     <>
       <ToastContainer position="top-right" autoClose={5000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="light" />
+      <JustificationModal
+        isOpen={isJustificationModalOpen}
+        onClose={() => {}}
+        onSubmit={handleSubmitJustification}
+      />
       <div className="min-h-screen flex flex-col">
         <main className="flex-grow flex flex-col items-center justify-center p-4">
           <h1 className="text-4xl font-bold text-gray-800 mb-6">Ponto Eletrônico</h1>
