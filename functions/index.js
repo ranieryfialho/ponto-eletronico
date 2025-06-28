@@ -10,7 +10,7 @@ app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
-const ALLOWED_RADIUS_METERS = 300;
+const ALLOWED_RADIUS_METERS = 320;
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
