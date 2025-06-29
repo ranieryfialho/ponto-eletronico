@@ -4,19 +4,59 @@ import { toast } from 'react-toastify';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const formatMillisToHours = (millis) => {
-  if (isNaN(millis) || millis < 0) return '00:00';
+const formatMillisToHours = (millis, allowNegative = false) => {
+  if (isNaN(millis)) return '00:00';
+
+  const sign = millis < 0 ? '-' : '';
+  if (allowNegative) {
+    millis = Math.abs(millis);
+  } else if (millis < 0) {
+    millis = 0;
+  }
+
   const totalSeconds = Math.floor(millis / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+
+  return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
+
+const getExpectedWorkMillis = (dayOfWeek, schedule) => {
+  if (!schedule) return 0;
+
+  let daySchedule;
+  if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+    daySchedule = schedule.saturday;
+  } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+    daySchedule = schedule.weekday;
+  } else {
+    return 0;
+  }
+
+  if (!daySchedule || !daySchedule.entry || !daySchedule.exit) return 0;
+
+  const [entryH, entryM] = daySchedule.entry.split(':').map(Number);
+  const [exitH, exitM] = daySchedule.exit.split(':').map(Number);
+  const [breakStartH, breakStartM] = (daySchedule.breakStart || '00:00').split(':').map(Number);
+  const [breakEndH, breakEndM] = (daySchedule.breakEnd || '00:00').split(':').map(Number);
+
+  const entryDate = new Date(0); entryDate.setHours(entryH, entryM);
+  const exitDate = new Date(0); exitDate.setHours(exitH, exitM);
+  const breakStartDate = new Date(0); breakStartDate.setHours(breakStartH, breakStartM);
+  const breakEndDate = new Date(0); breakEndDate.setHours(breakEndH, breakEndM);
+
+  const totalMillis = exitDate - entryDate;
+  const breakMillis = breakEndDate - breakStartDate;
+
+  return totalMillis - breakMillis;
+};
+
 
 export function ReportView({ user, onBack }) {
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  
+
   const [reportData, setReportData] = useState(null);
   const [employeeProfile, setEmployeeProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,7 +73,8 @@ export function ReportView({ user, onBack }) {
         setEmployeeProfile(profileData);
       } catch (err) {
         setError('Não foi possível carregar os dados do perfil. ' + err.message);
-        setIsLoading(false); 
+      } finally {
+        setIsLoading(false);
       }
   }, [user]);
 
@@ -51,17 +92,21 @@ export function ReportView({ user, onBack }) {
       const response = await fetch(`/api/admin/reports/time-entries?userId=${user.uid}&startDate=${startDate}&endDate=${endDate}`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (!response.ok) { const data = await response.json(); throw new Error(data.error || 'Falha ao buscar dados.'); }
       const entries = await response.json();
+
       const entriesByDay = entries.reduce((acc, entry) => {
         const date = new Date(entry.timestamp).toLocaleDateString('pt-BR');
-        if (!acc[date]) { acc[date] = { punches: [], totalWorkMillis: 0, totalBreakMillis: 0 }; }
+        if (!acc[date]) { acc[date] = { punches: [], totalWorkMillis: 0, totalBreakMillis: 0, dailyBalanceMillis: 0 }; }
         acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) });
         return acc;
       }, {});
-      
+
       let grandTotalWorkMillis = 0;
-      
+      let grandTotalBalanceMillis = 0;
+
       for (const date in entriesByDay) {
         let clockInTime = null, breakStartTime = null;
+        const dayOfWeek = entriesByDay[date].punches[0].time.getDay();
+
         entriesByDay[date].punches.forEach(entry => {
           if (entry.status === 'rejeitado') return;
           const entryTime = entry.time;
@@ -70,10 +115,22 @@ export function ReportView({ user, onBack }) {
           if (entry.type === 'Fim do Intervalo' && breakStartTime) { entriesByDay[date].totalBreakMillis += entryTime - breakStartTime; breakStartTime = null; }
           if (entry.type === 'Saída' && clockInTime) { entriesByDay[date].totalWorkMillis += entryTime - clockInTime; clockInTime = null; }
         });
+
         entriesByDay[date].totalWorkMillis -= entriesByDay[date].totalBreakMillis;
+
+        const expectedWorkMillis = getExpectedWorkMillis(dayOfWeek, employeeProfile.workHours);
+        entriesByDay[date].dailyBalanceMillis = entriesByDay[date].totalWorkMillis - expectedWorkMillis;
+
         grandTotalWorkMillis += entriesByDay[date].totalWorkMillis;
+        grandTotalBalanceMillis += entriesByDay[date].dailyBalanceMillis;
       }
-      setReportData({ groupedEntries: entriesByDay, grandTotal: formatMillisToHours(grandTotalWorkMillis) });
+
+      setReportData({
+        groupedEntries: entriesByDay,
+        grandTotal: formatMillisToHours(grandTotalWorkMillis),
+        grandTotalBalance: formatMillisToHours(grandTotalBalanceMillis, true) // Permite saldo negativo
+      });
+
     } catch (err) { setError(err.message); } finally { setIsLoading(false); }
   }, [user, startDate, endDate, employeeProfile]);
 
@@ -83,9 +140,10 @@ export function ReportView({ user, onBack }) {
     }
   }, [employeeProfile, handleGenerateReport]);
 
+
   const handleShowOnMap = (location) => {
     if (location && location.lat && location.lon) {
-      const url = `https://maps.google.com/?cid=170535968932282901494{location.lat},${location.lon}`;
+      const url = `https://www.google.com/maps?q=${location.lat},${location.lon}`;
       window.open(url, '_blank', 'noopener,noreferrer');
     } else {
       toast.error("Coordenadas não encontradas para este registro.");
@@ -94,14 +152,28 @@ export function ReportView({ user, onBack }) {
 
   const handleExportCSV = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
-    const headers = ['Data', 'Tipo de Registro', 'Horário', 'Latitude', 'Longitude'];
+    const headers = ['Data', 'Tipo de Registro', 'Horário', 'Latitude', 'Longitude', 'Saldo do Dia'];
     const csvRows = [headers.join(',')];
+
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
-      data.punches.forEach(punch => { csvRows.push([date, `"${punch.type}"`, punch.time.toLocaleTimeString('pt-BR'), punch.location?.lat || '', punch.location?.lon || ''].join(',')); });
-      csvRows.push([`"Total Trabalhado (${date})"`, `"${formatMillisToHours(data.totalWorkMillis)}"`]);
-      csvRows.push([`"Total em Intervalo (${date})"`, `"${formatMillisToHours(data.totalBreakMillis)}"`]);
-      csvRows.push([]);
+        data.punches.forEach(punch => {
+            csvRows.push([
+                date,
+                `"${punch.type}"`,
+                punch.time.toLocaleTimeString('pt-BR'),
+                punch.location?.lat || '',
+                punch.location?.lon || '',
+                ''
+            ].join(','));
+        });
+        csvRows.push([`"Total Trabalhado (${date})"`,'', `"${formatMillisToHours(data.totalWorkMillis)}"`]);
+        csvRows.push([`"Total em Intervalo (${date})"`,'', `"${formatMillisToHours(data.totalBreakMillis)}"`]);
+        csvRows.push([`"Saldo do Dia (${date})"`,'', `"${formatMillisToHours(data.dailyBalanceMillis, true)}"`]);
+        csvRows.push([]);
     }
+    csvRows.push([`"Total de Horas Trabalhadas no Período"`,'', `"${reportData.grandTotal}"`]);
+    csvRows.push([`"Saldo de Horas no Período"`,'', `"${reportData.grandTotalBalance}"`]);
+
     const csvString = csvRows.join('\n');
     const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -115,7 +187,7 @@ export function ReportView({ user, onBack }) {
     link.click();
     document.body.removeChild(link);
   };
-  
+
   const handleExportPDF = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
     const doc = new jsPDF();
@@ -123,35 +195,49 @@ export function ReportView({ user, onBack }) {
     const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, '_');
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`;
+
     doc.setFontSize(18); doc.text('Relatório de Ponto', 14, 22);
     doc.setFontSize(11); doc.setTextColor(100);
     doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 30);
     doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 36);
-    const tableHeaders = [['Data', 'Entrada', 'Início Interv.', 'Fim Interv.', 'Saída', 'Total Trab.']];
+
+    const tableHeaders = [['Data', 'Entrada', 'Início Interv.', 'Fim Interv.', 'Saída', 'Total Trab.', 'Saldo Dia']];
     const tableData = [];
+
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
       const entryTime = data.punches.find(p => p.type === 'Entrada')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const breakStartTime = data.punches.find(p => p.type === 'Início do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const breakEndTime = data.punches.find(p => p.type === 'Fim do Intervalo')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const exitTime = data.punches.find(p => p.type === 'Saída')?.time.toLocaleTimeString('pt-BR') || '--:--:--';
       const totalWork = formatMillisToHours(data.totalWorkMillis);
-      tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
+      const dailyBalance = formatMillisToHours(data.dailyBalanceMillis, true);
+      tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork, dailyBalance]);
     }
+
     autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
+
     let finalY = doc.lastAutoTable.finalY || 50;
     if (finalY > 240) { doc.addPage(); finalY = 10; }
+
     doc.setFontSize(10);
     doc.text('Total de Horas Trabalhadas no Período:', 14, finalY + 20);
     doc.setFont(undefined, 'bold');
-    doc.text(reportData.grandTotal, 80, finalY + 20);
+    doc.text(reportData.grandTotal, 85, finalY + 20);
+
+    doc.setFont(undefined, 'normal');
+    doc.text('Saldo de Horas no Período:', 14, finalY + 26);
+    doc.setFont(undefined, 'bold');
+    doc.text(reportData.grandTotalBalance, 85, finalY + 26);
+
     doc.setFont(undefined, 'normal');
     doc.text('_________________________', 14, finalY + 40);
     doc.text('Assinatura do Colaborador', 20, finalY + 45);
     doc.text('_________________________', 110, finalY + 40);
     doc.text('Assinatura do Diretor(a)', 118, finalY + 45);
+
     doc.save(fileName);
   };
-  
+
   const getPunchStatusColor = (punchType, punchTime) => {
     if (!employeeProfile?.workHours) return 'text-gray-600';
     const schedule = employeeProfile.workHours;
@@ -173,7 +259,7 @@ export function ReportView({ user, onBack }) {
     scheduledTime.setHours(hours, minutes, 0, 0);
     const diffMinutes = (punchTime.getTime() - scheduledTime.getTime()) / 60000;
     const tolerance = 10;
-    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; } 
+    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; }
     else { return 'text-red-600 font-semibold'; }
   };
 
@@ -218,58 +304,74 @@ export function ReportView({ user, onBack }) {
       </div>
 
       {isLoading && <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Gerando relatório...</div>}
-      
+
       {!isLoading && reportData && (
-        <div className="space-y-4">
-          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
-            <p className="text-md font-medium text-blue-800">Total de Horas Trabalhadas no Período Selecionado</p>
-            <p className="text-4xl font-bold text-blue-900 mt-1">{reportData.grandTotal}</p>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
+              <p className="text-md font-medium text-blue-800">Total de Horas Trabalhadas no Período</p>
+              <p className="text-4xl font-bold text-blue-900 mt-1">{reportData.grandTotal}</p>
+            </div>
+            <div className={`p-4 rounded-xl border ${reportData.grandTotalBalance?.startsWith('-') ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'} text-center`}>
+              <p className={`text-md font-medium ${reportData.grandTotalBalance?.startsWith('-') ? 'text-red-800' : 'text-green-800'}`}>Saldo de Horas no Período</p>
+              <p className={`text-4xl font-bold ${reportData.grandTotalBalance?.startsWith('-') ? 'text-red-900' : 'text-green-900'} mt-1`}>{reportData.grandTotalBalance}</p>
+            </div>
           </div>
-          {Object.keys(reportData.groupedEntries).length > 0 ? (
-            Object.entries(reportData.groupedEntries).map(([date, data]) => (
-              <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
-                <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                  <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-3xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
-                  <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-3xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
-                </div>
-                <ul className="divide-y divide-gray-200">
-                  {data.punches.map(entry => {
-                    const timeColorClass = getPunchStatusColor(entry.type, entry.time);
-                    const isRejected = entry.status === 'rejeitado';
-                    return (
-                      <li key={entry.id} className={`py-3 flex justify-between items-center ${isRejected ? 'bg-red-50 rounded-md' : ''}`}>
-                         <div>
-                            <span className={`font-medium text-gray-800 ${isRejected ? 'line-through' : ''}`}>{entry.type}</span>
-                             {isRejected && entry.rejectionReason && (
-                               <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
-                             )}
-                         </div>
-                        <div className="flex items-center gap-4">
-                          <button 
-                            onClick={() => handleShowOnMap(entry.location)}
-                            title="Ver localização no mapa"
-                            className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                          </button>
-                          <span className={`font-mono text-lg ${isRejected ? 'text-red-600 line-through' : timeColorClass}`}>
-                            {entry.time.toLocaleTimeString('pt-BR')}
-                          </span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          ) : (
-            <div className="p-6 bg-white rounded-xl shadow-md border border-gray-200 text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
-          )}
-        </div>
+
+          <div className="space-y-4">
+            {Object.keys(reportData.groupedEntries).length > 0 ? (
+              Object.entries(reportData.groupedEntries).map(([date, data]) => {
+                const dailyBalanceIsNegative = data.dailyBalanceMillis < 0;
+                return (
+                  <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
+                    <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                      <div className="bg-green-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-green-800">Total Trabalhado</p><p className="text-2xl font-bold text-green-900">{formatMillisToHours(data.totalWorkMillis)}</p></div>
+                      <div className="bg-yellow-100 p-4 rounded-lg text-center"><p className="text-sm font-medium text-yellow-800">Total em Intervalo</p><p className="text-2xl font-bold text-yellow-900">{formatMillisToHours(data.totalBreakMillis)}</p></div>
+                      <div className={`p-4 rounded-lg text-center ${dailyBalanceIsNegative ? 'bg-red-100' : 'bg-blue-100'}`}>
+                        <p className={`text-sm font-medium ${dailyBalanceIsNegative ? 'text-red-800' : 'text-blue-800'}`}>Saldo do Dia</p>
+                        <p className={`text-2xl font-bold ${dailyBalanceIsNegative ? 'text-red-700' : 'text-blue-700'}`}>{formatMillisToHours(data.dailyBalanceMillis, true)}</p>
+                      </div>
+                    </div>
+                    <ul className="divide-y divide-gray-200">
+                      {data.punches.map(entry => {
+                        const timeColorClass = getPunchStatusColor(entry.type, entry.time);
+                        const isRejected = entry.status === 'rejeitado';
+                        return (
+                          <li key={entry.id} className={`py-3 flex justify-between items-center ${isRejected ? 'bg-red-50 rounded-md' : ''}`}>
+                             <div>
+                                <span className={`font-medium text-gray-800 ${isRejected ? 'line-through' : ''}`}>{entry.type}</span>
+                                 {isRejected && entry.rejectionReason && (
+                                   <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
+                                 )}
+                             </div>
+                            <div className="flex items-center gap-4">
+                              <button
+                                onClick={() => handleShowOnMap(entry.location)}
+                                title="Ver localização no mapa"
+                                className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                              </button>
+                              <span className={`font-mono text-lg ${isRejected ? 'text-red-600 line-through' : timeColorClass}`}>
+                                {entry.time.toLocaleTimeString('pt-BR')}
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Nenhuma marcação encontrada para o período selecionado.</div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
