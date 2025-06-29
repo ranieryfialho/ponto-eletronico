@@ -5,7 +5,6 @@ const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
 
 const app = express();
-
 app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
 app.use(express.json());
 
@@ -33,7 +32,7 @@ const verifyAdmin = (req, res, next) => {
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { location, type, justification } = req.body; 
+    const { location, type, justification } = req.body;
     const requestIp = req.ip;
     const now = new Date();
 
@@ -44,24 +43,31 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     let entryStatus = 'aprovado';
     let successMessage = `Registro de '${type}' realizado com sucesso!`;
-    let requiresJustification = false;
 
     if (type === 'Entrada') {
       const employeeDoc = await db.collection('employees').doc(userId).get();
       if (employeeDoc.exists && employeeDoc.data().workHours) {
         const schedule = employeeDoc.data().workHours;
-        if (schedule.entry) {
-          const [hours, minutes] = schedule.entry.split(':');
+
+        const dayOfWeek = now.getDay();
+        let scheduledTimeString = null;
+
+        if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+          scheduledTimeString = schedule.saturday.entry; 
+        } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          scheduledTimeString = schedule.weekday?.entry; 
+        }
+
+        if (scheduledTimeString) {
+          const [hours, minutes] = scheduledTimeString.split(':');
           const scheduledTime = new Date(now.getTime());
           scheduledTime.setHours(hours, minutes, 0, 0);
+
           const latenessMinutes = Math.floor((now.getTime() - scheduledTime.getTime()) / 60000);
 
           if (latenessMinutes > 120) {
             if (!justification) {
-              return res.status(422).json({ 
-                error: 'Justificativa necessária.',
-                requiresJustification: true 
-              });
+              return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
             }
             entryStatus = 'pendente_aprovacao';
             successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
@@ -78,7 +84,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       type: type,
       validatedIp: requestIp,
       status: entryStatus,
-      justification: justification || null, // Salva a justificativa
+      justification: justification || null,
     };
 
     await db.collection('timeEntries').add(timeRecord);
@@ -89,6 +95,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
     res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
   }
 });
+
 
 // ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
@@ -179,17 +186,11 @@ app.get('/api/admin/reports/time-entries', verifyFirebaseToken, verifyAdmin, asy
 
 app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
-    const pendingQuery = db.collection('timeEntries')
-      .where('status', '==', 'pendente_aprovacao')
-      .orderBy('timestamp', 'asc');
+    const pendingQuery = db.collection('timeEntries').where('status', '==', 'pendente_aprovacao').orderBy('timestamp', 'asc');
     const snapshot = await pendingQuery.get();
     const entries = snapshot.docs.map(doc => {
       const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        timestamp: data.timestamp.toDate().toISOString(),
-      };
+      return { id: doc.id, ...data, timestamp: data.timestamp.toDate().toISOString() };
     });
     res.status(200).json(entries);
   } catch (error) {
@@ -213,14 +214,9 @@ app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin,
   try {
     const { entryId } = req.params;
     const { reason } = req.body;
-    if (!reason) {
-      return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' });
-    }
-    await db.collection('timeEntries').doc(entryId).update({ 
-      status: 'rejeitado',
-      rejectionReason: reason 
-    });
-    res.status(200).json({ success: 'Registro de ponto rejeitado com sucesso.' });
+    if (!reason) { return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' }); }
+    await db.collection('timeEntries').doc(entryId).update({ status: 'rejeitado', rejectionReason: reason });
+    res.status(200).json({ success: 'Registro de ponto rejeitado.' });
   } catch (error) {
     console.error("Erro ao rejeitar registro:", error);
     res.status(500).json({ error: 'Erro interno ao rejeitar registro.' });

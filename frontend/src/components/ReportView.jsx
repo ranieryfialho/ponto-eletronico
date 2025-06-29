@@ -16,25 +16,25 @@ export function ReportView({ user, onBack }) {
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-
+  
   const [reportData, setReportData] = useState(null);
   const [employeeProfile, setEmployeeProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const fetchProfile = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    try {
-      const token = await auth.currentUser.getIdToken();
-      const response = await fetch(`/api/admin/employees/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
-      if (!response.ok) throw new Error('Falha ao buscar perfil.');
-      const profileData = await response.json();
-      setEmployeeProfile(profileData);
-    } catch (err) {
-      setError('Não foi possível carregar os dados do perfil. ' + err.message);
-      setIsLoading(false);
-    }
+      if (!user) return;
+      setIsLoading(true);
+      try {
+        const token = await auth.currentUser.getIdToken();
+        const response = await fetch(`/api/admin/employees/${user.uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!response.ok) throw new Error('Falha ao buscar perfil.');
+        const profileData = await response.json();
+        setEmployeeProfile(profileData);
+      } catch (err) {
+        setError('Não foi possível carregar os dados do perfil. ' + err.message);
+        setIsLoading(false); 
+      }
   }, [user]);
 
   useEffect(() => {
@@ -57,9 +57,9 @@ export function ReportView({ user, onBack }) {
         acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) });
         return acc;
       }, {});
-
+      
       let grandTotalWorkMillis = 0;
-
+      
       for (const date in entriesByDay) {
         let clockInTime = null, breakStartTime = null;
         entriesByDay[date].punches.forEach(entry => {
@@ -85,7 +85,7 @@ export function ReportView({ user, onBack }) {
 
   const handleShowOnMap = (location) => {
     if (location && location.lat && location.lon) {
-      const url = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lon}`;
+      const url = `https://maps.google.com/?cid=170535968932282901494{location.lat},${location.lon}`;
       window.open(url, '_blank', 'noopener,noreferrer');
     } else {
       toast.error("Coordenadas não encontradas para este registro.");
@@ -115,12 +115,12 @@ export function ReportView({ user, onBack }) {
     link.click();
     document.body.removeChild(link);
   };
-
+  
   const handleExportPDF = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) { alert('Não há dados para exportar.'); return; }
     const doc = new jsPDF();
-    const formattedStartDate = new Date(startDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-    const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+    const formattedStartDate = new Date(startDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
+    const formattedEndDate = new Date(endDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'});
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, '_');
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`;
     doc.setFontSize(18); doc.text('Relatório de Ponto', 14, 22);
@@ -137,7 +137,7 @@ export function ReportView({ user, onBack }) {
       const totalWork = formatMillisToHours(data.totalWorkMillis);
       tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork]);
     }
-    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] } });
+    autoTable(doc, { startY: 45, head: tableHeaders, body: tableData, theme: 'striped', headStyles: { fillColor: [41, 128, 185] }});
     let finalY = doc.lastAutoTable.finalY || 50;
     if (finalY > 240) { doc.addPage(); finalY = 10; }
     doc.setFontSize(10);
@@ -151,11 +151,21 @@ export function ReportView({ user, onBack }) {
     doc.text('Assinatura do Diretor(a)', 118, finalY + 45);
     doc.save(fileName);
   };
-
+  
   const getPunchStatusColor = (punchType, punchTime) => {
     if (!employeeProfile?.workHours) return 'text-gray-600';
     const schedule = employeeProfile.workHours;
-    const scheduleMap = { 'Entrada': schedule.entry, 'Início do Intervalo': schedule.breakStart, 'Fim do Intervalo': schedule.breakEnd, 'Saída': schedule.exit, };
+    const dayOfWeek = punchTime.getDay();
+    let daySchedule;
+    if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+      daySchedule = schedule.saturday;
+    } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      daySchedule = schedule.weekday;
+    } else {
+      return 'text-gray-600';
+    }
+    if (!daySchedule) return 'text-gray-600';
+    const scheduleMap = { 'Entrada': daySchedule.entry, 'Início do Intervalo': daySchedule.breakStart, 'Fim do Intervalo': daySchedule.breakEnd, 'Saída': daySchedule.exit, };
     const scheduledTimeString = scheduleMap[punchType];
     if (!scheduledTimeString) return 'text-gray-600';
     const [hours, minutes] = scheduledTimeString.split(':');
@@ -163,13 +173,13 @@ export function ReportView({ user, onBack }) {
     scheduledTime.setHours(hours, minutes, 0, 0);
     const diffMinutes = (punchTime.getTime() - scheduledTime.getTime()) / 60000;
     const tolerance = 10;
-    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; }
+    if (Math.abs(diffMinutes) <= tolerance) { return 'text-green-600 font-semibold'; } 
     else { return 'text-red-600 font-semibold'; }
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-4">
+       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Relatório de Ponto</h1>
           <p className="text-gray-500">{user.displayName || user.email}</p>
@@ -208,7 +218,7 @@ export function ReportView({ user, onBack }) {
       </div>
 
       {isLoading && <div className="p-6 bg-white rounded-xl shadow-md border text-center text-gray-500">Gerando relatório...</div>}
-
+      
       {!isLoading && reportData && (
         <div className="space-y-4">
           <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 text-center">
@@ -229,9 +239,14 @@ export function ReportView({ user, onBack }) {
                     const isRejected = entry.status === 'rejeitado';
                     return (
                       <li key={entry.id} className={`py-3 flex justify-between items-center ${isRejected ? 'bg-red-50 rounded-md' : ''}`}>
-                        <span className={`font-medium text-gray-800 ${isRejected ? 'line-through' : ''}`}>{entry.type}</span>
+                         <div>
+                            <span className={`font-medium text-gray-800 ${isRejected ? 'line-through' : ''}`}>{entry.type}</span>
+                             {isRejected && entry.rejectionReason && (
+                               <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
+                             )}
+                         </div>
                         <div className="flex items-center gap-4">
-                          <button
+                          <button 
                             onClick={() => handleShowOnMap(entry.location)}
                             title="Ver localização no mapa"
                             className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full"

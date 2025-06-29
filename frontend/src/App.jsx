@@ -1,4 +1,3 @@
-// src/App.jsx (Versão Final com Modal de Justificativa)
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -9,7 +8,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Footer } from './components/Footer';
 import { Disclosure, Transition } from '@headlessui/react';
-import { JustificationModal } from './components/JustificationModal'; // 1. Importar o novo modal
+import { JustificationModal } from './components/JustificationModal';
 
 const STATUS = { LOADING: 'carregando...', CLOCKED_OUT: 'fora_do_expediente', WORKING: 'trabalhando', ON_BREAK: 'em_intervalo' };
 const ENTRY_TYPES = { CLOCK_IN: 'Entrada', BREAK_START: 'Início do Intervalo', BREAK_END: 'Fim do Intervalo', CLOCK_OUT: 'Saída' };
@@ -22,8 +21,6 @@ function App() {
   const [userStatus, setUserStatus] = useState(STATUS.LOADING);
   const [message, setMessage] = useState("Bem-vindo!");
   const [isLoading, setIsLoading] = useState(false);
-
-  // 2. Estados para controlar o modal
   const [isJustificationModalOpen, setIsJustificationModalOpen] = useState(false);
   const [lateEntryLocation, setLateEntryLocation] = useState(null);
 
@@ -83,7 +80,6 @@ function App() {
     );
   };
 
-  // 3. Lógica de registro ATUALIZADA para lidar com a justificativa
   const sendDataToServer = async (location, type, justification = null) => {
     setIsLoading(true);
     try {
@@ -94,35 +90,29 @@ function App() {
         body: JSON.stringify({ location, type, justification }),
       });
       const data = await response.json();
-
       if (response.status === 422 && data.requiresJustification) {
         setLateEntryLocation(location);
         setIsJustificationModalOpen(true);
-        // Mantém o isLoading ativo enquanto o modal estiver aberto
         return; 
       }
-
       if (!response.ok) throw new Error(data.error);
-      
       toast.success(data.success);
       setMessage(`✅ ${data.success}`);
     } catch (error) {
       toast.error(error.message);
       setMessage(`❌ Erro: ${error.message}`);
     } finally {
-      // Só para de carregar se o modal não for abrir
       if (!isJustificationModalOpen) {
         setIsLoading(false);
       }
     }
   };
 
-  // 4. Nova função para ser chamada pelo modal
   const handleSubmitJustification = async (justification) => {
     await sendDataToServer(lateEntryLocation, 'Entrada', justification);
     setIsJustificationModalOpen(false);
     setLateEntryLocation(null);
-    setIsLoading(false); // Agora para o carregamento
+    setIsLoading(false);
   };
 
   const handleLogout = () => { signOut(auth); };
@@ -207,7 +197,7 @@ function App() {
       <ToastContainer position="top-right" autoClose={5000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="light" />
       <JustificationModal
         isOpen={isJustificationModalOpen}
-        onClose={() => {}}
+        onClose={() => {setIsJustificationModalOpen(false); setIsLoading(false);}}
         onSubmit={handleSubmitJustification}
       />
       <div className="min-h-screen flex flex-col">
