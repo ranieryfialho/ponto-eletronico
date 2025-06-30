@@ -223,5 +223,40 @@ app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin,
   }
 });
 
+app.put('/api/admin/entries/:entryId', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { entryId } = req.params;
+    const { newTimestamp, newType, reason } = req.body;
+
+    if (!newTimestamp || !newType || !reason) {
+      return res.status(400).json({ error: 'Nova data/hora, tipo e justificativa são obrigatórios.' });
+    }
+
+    const entryRef = db.collection('timeEntries').doc(entryId);
+    const doc = await entryRef.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Registro de ponto não encontrado.' });
+    }
+
+    const originalTimestamp = doc.data().timestamp;
+
+    const correctedTimestamp = new Date(newTimestamp + "-03:00");
+
+    await entryRef.update({
+      timestamp: correctedTimestamp,
+      type: newType,
+      isEdited: true,
+      editReason: reason,
+      originalTimestamp: originalTimestamp 
+    });
+
+    res.status(200).json({ success: 'Registro de ponto atualizado com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao atualizar registro de ponto:", error);
+    res.status(500).json({ error: 'Erro interno ao atualizar registro.' });
+  }
+});
+
 
 exports.api = functions.https.onRequest(app);
