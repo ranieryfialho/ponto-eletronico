@@ -9,7 +9,7 @@ app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
-const ALLOWED_RADIUS_METERS = 300;
+const ALLOWED_RADIUS_METERS = 500;
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -48,22 +48,24 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       const employeeDoc = await db.collection('employees').doc(userId).get();
       if (employeeDoc.exists && employeeDoc.data().workHours) {
         const schedule = employeeDoc.data().workHours;
-
-        const dayOfWeek = now.getDay();
+        
+        const dayOfWeek = now.getUTCDay();
         let scheduledTimeString = null;
 
         if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-          scheduledTimeString = schedule.saturday.entry; 
+          scheduledTimeString = schedule.saturday.entry;
         } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-          scheduledTimeString = schedule.weekday?.entry; 
+          scheduledTimeString = schedule.weekday?.entry;
         }
 
         if (scheduledTimeString) {
-          const [hours, minutes] = scheduledTimeString.split(':');
-          const scheduledTime = new Date(now.getTime());
-          scheduledTime.setHours(hours, minutes, 0, 0);
+          const [hours, minutes] = scheduledTimeString.split(':').map(Number);
+          
+          const scheduledTimeUTC = new Date();
+          scheduledTimeUTC.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+          scheduledTimeUTC.setUTCHours(hours + 3, minutes, 0, 0);
 
-          const latenessMinutes = Math.floor((now.getTime() - scheduledTime.getTime()) / 60000);
+          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeUTC.getTime()) / 60000);
 
           if (latenessMinutes > 120) {
             if (!justification) {
@@ -96,8 +98,6 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-
-// ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);
