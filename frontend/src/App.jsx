@@ -1,5 +1,3 @@
-"use client"
-
 import { useState, useEffect, useMemo } from "react"
 import { auth, db } from "./firebase-config"
 import { onAuthStateChanged, signOut } from "firebase/auth"
@@ -23,46 +21,6 @@ const ENTRY_TYPES = {
   BREAK_START: "Início do Intervalo",
   BREAK_END: "Fim do Intervalo",
   CLOCK_OUT: "Saída",
-}
-
-const formatMillisToHours = (millis, allowNegative = false) => {
-  if (isNaN(millis)) return "00:00"
-  const sign = millis < 0 ? "-" : ""
-  if (allowNegative) {
-    millis = Math.abs(millis)
-  } else if (millis < 0) {
-    millis = 0
-  }
-  const totalSeconds = Math.floor(millis / 1000)
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  return `${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
-}
-
-const getExpectedWorkMillis = (dayOfWeek, schedule) => {
-  if (!schedule) return 0
-  let daySchedule
-  if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-    daySchedule = schedule.saturday
-  } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-    daySchedule = schedule.weekday
-  } else {
-    return 0
-  }
-  if (!daySchedule || !daySchedule.entry || !daySchedule.exit) return 0
-  const [entryH, entryM] = daySchedule.entry.split(":").map(Number)
-  const [exitH, exitM] = daySchedule.exit.split(":").map(Number)
-  const [breakStartH, breakStartM] = (daySchedule.breakStart || "00:00").split(":").map(Number)
-  const [breakEndH, breakEndM] = (daySchedule.breakEnd || "00:00").split(":").map(Number)
-  const entryDate = new Date(0)
-  entryDate.setHours(entryH, entryM)
-  const exitDate = new Date(0)
-  exitDate.setHours(exitH, exitM)
-  const breakStartDate = new Date(0)
-  breakStartDate.setHours(breakStartH, breakStartM)
-  const breakEndDate = new Date(0)
-  breakEndDate.setHours(breakEndH, breakEndM)
-  return exitDate - entryDate - (breakEndDate - breakStartDate)
 }
 
 function App() {
@@ -111,23 +69,11 @@ function App() {
           setEmployeeProfile(profileData)
         } else {
           console.error("Falha ao buscar perfil do funcionário. Status:", response.status)
-          // Criar um perfil básico para permitir visualização do histórico
-          setEmployeeProfile({
-            workHours: {
-              weekday: { entry: "08:00", exit: "17:00", breakStart: "12:00", breakEnd: "13:00" },
-              saturday: { isWorkDay: false },
-            },
-          })
+          setEmployeeProfile({ workHours: null })
         }
       } catch (error) {
         console.error("Erro ao buscar perfil:", error)
-        // Criar um perfil básico para permitir visualização do histórico
-        setEmployeeProfile({
-          workHours: {
-            weekday: { entry: "08:00", exit: "17:00", breakStart: "12:00", breakEnd: "13:00" },
-            saturday: { isWorkDay: false },
-          },
-        })
+        setEmployeeProfile({ workHours: null })
       } finally {
         setProfileLoading(false)
       }
@@ -175,16 +121,15 @@ function App() {
   }, [user])
 
   const groupedHistory = useMemo(() => {
-    // Sempre mostrar histórico, mesmo sem perfil completo
     if (timeHistory.length === 0) return {}
 
-    const groups = timeHistory.reduce((acc, entry) => {
+    return timeHistory.reduce((acc, entry) => {
       const entryDate = new Date(entry.timestamp.seconds * 1000)
       const monthYear = entryDate.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })
       const day = entryDate.toLocaleDateString("pt-BR")
 
       if (!acc[monthYear]) {
-        acc[monthYear] = { days: {}, totalBalanceMillis: 0 }
+        acc[monthYear] = { days: {} }
       }
       if (!acc[monthYear].days[day]) {
         acc[monthYear].days[day] = []
@@ -193,47 +138,7 @@ function App() {
       acc[monthYear].days[day].push(entry)
       return acc
     }, {})
-
-    // Calcular saldos apenas se tiver perfil com horários de trabalho
-    if (employeeProfile?.workHours) {
-      for (const month in groups) {
-        let monthBalance = 0
-        for (const day in groups[month].days) {
-          let dailyWork = 0,
-            dailyBreak = 0
-          let clockInTime = null,
-            breakStartTime = null
-          const dayOfWeek = new Date(groups[month].days[day][0].timestamp.seconds * 1000).getDay()
-
-          const sortedPunches = [...groups[month].days[day]].sort((a, b) => a.timestamp.seconds - b.timestamp.seconds)
-
-          sortedPunches.forEach((punch) => {
-            if (punch.status === "rejeitado") return
-            const punchTime = new Date(punch.timestamp.seconds * 1000)
-            if (punch.type === "Entrada") clockInTime = punchTime
-            if (punch.type === "Início do Intervalo") breakStartTime = punchTime
-            if (punch.type === "Fim do Intervalo" && breakStartTime) {
-              dailyBreak += punchTime - breakStartTime
-              breakStartTime = null
-            }
-            if (punch.type === "Saída" && clockInTime) {
-              dailyWork += punchTime - clockInTime
-              clockInTime = null
-            }
-          })
-
-          const netWork = dailyWork - dailyBreak
-          const expectedWork = getExpectedWorkMillis(dayOfWeek, employeeProfile.workHours)
-          if (expectedWork > 0 || netWork > 0) {
-            monthBalance += netWork - expectedWork
-          }
-        }
-        groups[month].totalBalanceMillis = monthBalance
-      }
-    }
-
-    return groups
-  }, [timeHistory, employeeProfile])
+  }, [timeHistory])
 
   const handleRegister = (entryType) => {
     setIsLoading(true)
@@ -392,7 +297,6 @@ function App() {
           </button>
         </div>
 
-        {/* Seção do Histórico - Sempre visível quando há registros */}
         {Object.keys(groupedHistory).length > 0 && (
           <div className="mt-8 w-full">
             <h2 className="text-2xl font-bold mb-4 text-gray-800">Seu Histórico de Ponto</h2>
@@ -405,9 +309,6 @@ function App() {
 
             <div className="w-full rounded-2xl bg-white p-2 space-y-2 shadow-lg border border-gray-200">
               {Object.entries(groupedHistory).map(([monthYear, monthData]) => {
-                const isNegative = monthData.totalBalanceMillis < 0
-                const hasBalance = employeeProfile?.workHours && monthData.totalBalanceMillis !== undefined
-
                 return (
                   <Disclosure key={monthYear} as="div" className="w-full">
                     {({ open }) => (
@@ -415,13 +316,6 @@ function App() {
                         <Disclosure.Button className="flex w-full justify-between items-center rounded-lg bg-blue-100 px-4 py-3 text-left text-sm font-medium text-blue-900 hover:bg-blue-200 focus:outline-none focus-visible:ring focus-visible:ring-blue-500/75 transition-colors">
                           <span className="capitalize font-semibold">{monthYear}</span>
                           <div className="flex items-center gap-2 sm:gap-4">
-                            {hasBalance && (
-                              <span
-                                className={`text-xs font-bold px-2 py-1 rounded-full ${isNegative ? "bg-red-200 text-red-800" : "bg-green-200 text-green-800"}`}
-                              >
-                                Saldo: {formatMillisToHours(monthData.totalBalanceMillis, true)}
-                              </span>
-                            )}
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
                               className={`h-5 w-5 text-blue-500 transition-transform ${open ? "rotate-180" : ""}`}
@@ -501,14 +395,6 @@ function App() {
               })}
             </div>
 
-            {!employeeProfile?.workHours && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-yellow-800 text-sm">
-                  ℹ️ Os cálculos de saldo não estão disponíveis. Entre em contato com o administrador para configurar seu
-                  horário de trabalho.
-                </p>
-              </div>
-            )}
           </div>
         )}
 
