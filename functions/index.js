@@ -5,13 +5,11 @@ const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
 
 const app = express();
-
 app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
 const ALLOWED_RADIUS_METERS = 500;
-const ALLOWED_IPS = ['::1', '127.0.0.1'];
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -34,23 +32,72 @@ const verifyAdmin = (req, res, next) => {
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { location, type } = req.body;
+    const { location, type, justification } = req.body;
     const requestIp = req.ip;
     const now = new Date();
 
     const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
-    if (distance > ALLOWED_RADIUS_METERS) { return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` }); }
-    if (!ALLOWED_IPS.includes(requestIp)) { return res.status(400).json({ error: 'Você não parece estar conectado na rede da escola.' }); }
-    const timeRecord = { userId: userId, timestamp: new Date(), location: location, type: type, validatedIp: requestIp, };
-    const docRef = await db.collection('timeEntries').add(timeRecord);
-    res.status(201).json({ success: `Registro de '${type}' realizado com sucesso!`, docId: docRef.id });
+    if (distance > ALLOWED_RADIUS_METERS) {
+      return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` });
+    }
+
+    let entryStatus = 'aprovado';
+    let successMessage = `Registro de '${type}' realizado com sucesso!`;
+
+    if (type === 'Entrada') {
+      const employeeDoc = await db.collection('employees').doc(userId).get();
+      if (employeeDoc.exists && employeeDoc.data().workHours) {
+        const schedule = employeeDoc.data().workHours;
+        
+        const dayOfWeek = now.getUTCDay();
+        let scheduledTimeString = null;
+
+        if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+          scheduledTimeString = schedule.saturday.entry;
+        } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          scheduledTimeString = schedule.weekday?.entry;
+        }
+
+        if (scheduledTimeString) {
+          const [hours, minutes] = scheduledTimeString.split(':').map(Number);
+          
+          const scheduledTimeUTC = new Date();
+          scheduledTimeUTC.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+          scheduledTimeUTC.setUTCHours(hours + 3, minutes, 0, 0);
+
+          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeUTC.getTime()) / 60000);
+
+          if (latenessMinutes > 120) {
+            if (!justification) {
+              return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+            }
+            entryStatus = 'pendente_aprovacao';
+            successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
+          }
+        }
+      }
+    }
+
+    const timeRecord = {
+      userId: userId,
+      displayName: req.user.name || req.user.email,
+      timestamp: now,
+      location: location,
+      type: type,
+      validatedIp: requestIp,
+      status: entryStatus,
+      justification: justification || null,
+    };
+
+    await db.collection('timeEntries').add(timeRecord);
+    res.status(201).json({ success: successMessage });
+
   } catch (error) {
     console.error("Erro no servidor ao registrar ponto:", error);
     res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
   }
 });
 
-// ROTAS DE ADMINISTRAÇÃO
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);
@@ -139,17 +186,11 @@ app.get('/api/admin/reports/time-entries', verifyFirebaseToken, verifyAdmin, asy
 
 app.get('/api/admin/pending-entries', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
-    const pendingQuery = db.collection('timeEntries')
-      .where('status', '==', 'pendente_aprovacao')
-      .orderBy('timestamp', 'asc');
+    const pendingQuery = db.collection('timeEntries').where('status', '==', 'pendente_aprovacao').orderBy('timestamp', 'asc');
     const snapshot = await pendingQuery.get();
     const entries = snapshot.docs.map(doc => {
       const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-        timestamp: data.timestamp.toDate().toISOString(),
-      };
+      return { id: doc.id, ...data, timestamp: data.timestamp.toDate().toISOString() };
     });
     res.status(200).json(entries);
   } catch (error) {
@@ -173,17 +214,47 @@ app.post('/api/admin/entries/:entryId/reject', verifyFirebaseToken, verifyAdmin,
   try {
     const { entryId } = req.params;
     const { reason } = req.body;
-    if (!reason) {
-      return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' });
-    }
-    await db.collection('timeEntries').doc(entryId).update({ 
-      status: 'rejeitado',
-      rejectionReason: reason 
-    });
-    res.status(200).json({ success: 'Registro de ponto rejeitado com sucesso.' });
+    if (!reason) { return res.status(400).json({ error: 'O motivo da rejeição é obrigatório.' }); }
+    await db.collection('timeEntries').doc(entryId).update({ status: 'rejeitado', rejectionReason: reason });
+    res.status(200).json({ success: 'Registro de ponto rejeitado.' });
   } catch (error) {
     console.error("Erro ao rejeitar registro:", error);
     res.status(500).json({ error: 'Erro interno ao rejeitar registro.' });
+  }
+});
+
+app.put('/api/admin/entries/:entryId', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { entryId } = req.params;
+    const { newTimestamp, newType, reason } = req.body;
+
+    if (!newTimestamp || !newType || !reason) {
+      return res.status(400).json({ error: 'Nova data/hora, tipo e justificativa são obrigatórios.' });
+    }
+
+    const entryRef = db.collection('timeEntries').doc(entryId);
+    const doc = await entryRef.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: 'Registro de ponto não encontrado.' });
+    }
+
+    const originalTimestamp = doc.data().timestamp;
+
+    const correctedTimestamp = new Date(newTimestamp + "-03:00");
+
+    await entryRef.update({
+      timestamp: correctedTimestamp,
+      type: newType,
+      isEdited: true,
+      editReason: reason,
+      originalTimestamp: originalTimestamp 
+    });
+
+    res.status(200).json({ success: 'Registro de ponto atualizado com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao atualizar registro de ponto:", error);
+    res.status(500).json({ error: 'Erro interno ao atualizar registro.' });
   }
 });
 
