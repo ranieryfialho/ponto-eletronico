@@ -184,7 +184,7 @@ export function ReportView({ user, onBack }) {
 
   const handleShowOnMap = (location) => {
     if (location && location.lat && location.lon) {
-      const url = `https://maps.google.com/?cid=170535968932282901497{location.lat},${location.lon}`
+      const url = `https://maps.google.com/?cid=170535968932282901497${location.lat},${location.lon}`
       window.open(url, "_blank", "noopener,noreferrer")
     } else {
       toast.error("Coordenadas não encontradas para este registro.")
