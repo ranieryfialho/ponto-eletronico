@@ -1,15 +1,16 @@
-const functions = require('firebase-functions'); 
+const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
 const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
 
 const app = express();
-app.use(cors({ origin: 'https://ponto-eletronico-senior-81a53.web.app' }));
+app.use(cors({ origin: true }));
 app.use(express.json());
 
 const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
-const ALLOWED_RADIUS_METERS = 500;
+const ALLOWED_RADIUS_METERS = 300;
+const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -30,74 +31,86 @@ const verifyAdmin = (req, res, next) => {
 };
 
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const { location, type, justification } = req.body;
-    const requestIp = req.ip;
-    const now = new Date();
+    try {
+        const userId = req.user.uid;
+        const { location, type, justification } = req.body;
+        const requestIp = req.ip;
+        const now = new Date();
 
-    const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
-    if (distance > ALLOWED_RADIUS_METERS) {
-      return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` });
-    }
+        const lastEntryQuery = await db.collection('timeEntries')
+            .where('userId', '==', userId)
+            .orderBy('timestamp', 'desc')
+            .limit(1)
+            .get();
 
-    let entryStatus = 'aprovado';
-    let successMessage = `Registro de '${type}' realizado com sucesso!`;
-
-    if (type === 'Entrada') {
-      const employeeDoc = await db.collection('employees').doc(userId).get();
-      if (employeeDoc.exists && employeeDoc.data().workHours) {
-        const schedule = employeeDoc.data().workHours;
-        
-        const dayOfWeek = now.getUTCDay();
-        let scheduledTimeString = null;
-
-        if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-          scheduledTimeString = schedule.saturday.entry;
-        } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-          scheduledTimeString = schedule.weekday?.entry;
-        }
-
-        if (scheduledTimeString) {
-          const [hours, minutes] = scheduledTimeString.split(':').map(Number);
-          
-          const scheduledTimeUTC = new Date();
-          scheduledTimeUTC.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-          scheduledTimeUTC.setUTCHours(hours + 3, minutes, 0, 0);
-
-          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeUTC.getTime()) / 60000);
-
-          if (latenessMinutes > 120) {
-            if (!justification) {
-              return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+        if (!lastEntryQuery.empty) {
+            const lastEntry = lastEntryQuery.docs[0].data();
+            const lastTimestamp = lastEntry.timestamp.toDate().getTime();
+            const diff = now.getTime() - lastTimestamp;
+            if (diff < TEN_MINUTES_IN_MS) {
+                return res.status(429).json({ error: `Aguarde mais ${Math.ceil((TEN_MINUTES_IN_MS - diff) / 1000)} segundos para registrar novamente.` });
             }
-            entryStatus = 'pendente_aprovacao';
-            successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
-          }
         }
-      }
+
+
+        const distance = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
+        if (distance > ALLOWED_RADIUS_METERS) {
+            return res.status(400).json({ error: `Você está a ${distance.toFixed(0)}m de distância.` });
+        }
+
+        let entryStatus = 'aprovado';
+        let successMessage = `Registro de '${type}' realizado com sucesso!`;
+
+        if (type === 'Entrada') {
+            const employeeDoc = await db.collection('employees').doc(userId).get();
+            if (employeeDoc.exists && employeeDoc.data().workHours) {
+                const schedule = employeeDoc.data().workHours;
+                const dayOfWeek = now.getUTCDay();
+                let scheduledTimeString = null;
+
+                if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+                    scheduledTimeString = schedule.saturday.entry;
+                } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                    scheduledTimeString = schedule.weekday?.entry;
+                }
+
+                if (scheduledTimeString) {
+                    const [hours, minutes] = scheduledTimeString.split(':').map(Number);
+                    const scheduledTimeUTC = new Date();
+                    scheduledTimeUTC.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+                    scheduledTimeUTC.setUTCHours(hours + 3, minutes, 0, 0);
+                    const latenessMinutes = Math.floor((now.getTime() - scheduledTimeUTC.getTime()) / 60000);
+
+                    if (latenessMinutes > 120) {
+                        if (!justification) {
+                            return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+                        }
+                        entryStatus = 'pendente_aprovacao';
+                        successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
+                    }
+                }
+            }
+        }
+
+        const timeRecord = {
+            userId: userId,
+            displayName: req.user.name || req.user.email,
+            timestamp: now,
+            location: location,
+            type: type,
+            validatedIp: requestIp,
+            status: entryStatus,
+            justification: justification || null,
+        };
+
+        await db.collection('timeEntries').add(timeRecord);
+        res.status(201).json({ success: successMessage });
+
+    } catch (error) {
+        console.error("Erro no servidor ao registrar ponto:", error);
+        res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
-
-    const timeRecord = {
-      userId: userId,
-      displayName: req.user.name || req.user.email,
-      timestamp: now,
-      location: location,
-      type: type,
-      validatedIp: requestIp,
-      status: entryStatus,
-      justification: justification || null,
-    };
-
-    await db.collection('timeEntries').add(timeRecord);
-    res.status(201).json({ success: successMessage });
-
-  } catch (error) {
-    console.error("Erro no servidor ao registrar ponto:", error);
-    res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
-  }
 });
-
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);

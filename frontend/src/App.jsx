@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { auth, db } from "./firebase-config"
 import { onAuthStateChanged, signOut } from "firebase/auth"
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore"
+import { collection, query, where, orderBy, onSnapshot, limit } from "firebase/firestore"
 import { Auth } from "./components/Auth"
 import { AdminPanel } from "./components/AdminPanel"
 import { ToastContainer, toast } from "react-toastify"
@@ -23,6 +23,8 @@ const ENTRY_TYPES = {
   CLOCK_OUT: "Saída",
 }
 
+const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
+
 function App() {
   const [user, setUser] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -35,6 +37,18 @@ function App() {
   const [isJustificationModalOpen, setIsJustificationModalOpen] = useState(false)
   const [lateEntryLocation, setLateEntryLocation] = useState(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  const [lastEntryTimestamp, setLastEntryTimestamp] = useState(null);
+  const [timeToWait, setTimeToWait] = useState(0);
+
+  useEffect(() => {
+    if (timeToWait > 0) {
+      const timer = setTimeout(() => {
+        setTimeToWait(prev => prev - 1000);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [timeToWait]);
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -89,7 +103,11 @@ function App() {
       return
     }
 
-    const q = query(collection(db, "timeEntries"), where("userId", "==", user.uid), orderBy("timestamp", "desc"))
+    const q = query(
+        collection(db, "timeEntries"),
+        where("userId", "==", user.uid),
+        orderBy("timestamp", "desc")
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -100,7 +118,9 @@ function App() {
         const lastValidEntry = entries.find((e) => e.status !== "rejeitado")
         if (!lastValidEntry) {
           setUserStatus(STATUS.CLOCKED_OUT)
+          setLastEntryTimestamp(null)
         } else {
+          setLastEntryTimestamp(lastValidEntry.timestamp.seconds * 1000);
           const lastEntryType = lastValidEntry.type
           if (lastEntryType === ENTRY_TYPES.CLOCK_IN || lastEntryType === ENTRY_TYPES.BREAK_END) {
             setUserStatus(STATUS.WORKING)
@@ -141,6 +161,16 @@ function App() {
   }, [timeHistory])
 
   const handleRegister = (entryType) => {
+    if (lastEntryTimestamp) {
+      const now = new Date().getTime();
+      const diff = now - lastEntryTimestamp;
+      if (diff < TEN_MINUTES_IN_MS) {
+        const remaining = TEN_MINUTES_IN_MS - diff;
+        setTimeToWait(remaining);
+        toast.error(`Aguarde ${Math.ceil(remaining / 1000)} segundos para registrar novamente.`);
+        return;
+      }
+    }
     setIsLoading(true)
     setMessage("Obtendo localização...")
     navigator.geolocation.getCurrentPosition(
@@ -196,6 +226,13 @@ function App() {
   }
 
   const renderActionButtons = () => {
+    if (timeToWait > 0) {
+      return (
+        <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">
+          Aguarde... ({Math.ceil(timeToWait / 1000)}s)
+        </button>
+      );
+    }
     if (isLoading) {
       return (
         <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">
