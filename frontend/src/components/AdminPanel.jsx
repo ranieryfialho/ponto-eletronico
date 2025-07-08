@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { auth } from '../firebase-config';
 import { EditUserModal } from './EditUserModal';
 import { ReportView } from './ReportView';
@@ -16,6 +16,8 @@ function ManageUsersView() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [linkMessage, setLinkMessage] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -28,17 +30,32 @@ function ManageUsersView() {
         throw new Error(data.error || 'Falha ao buscar usuários.');
       }
       const data = await response.json();
+      data.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
       setUsers(data);
-    } catch (err) { setError(err.message); } finally { setIsLoading(false); }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!reportingUser) { fetchUsers(); }
+    if (!reportingUser) {
+      fetchUsers();
+    }
   }, [reportingUser, fetchUsers]);
+ 
+  const filteredUsers = useMemo(() => {
+    return users.filter(user =>
+      (user.displayName && user.displayName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (user.email && user.email.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [users, searchTerm]);
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true); setFormMessage('');
+    setIsSubmitting(true);
+    setFormMessage('');
     try {
       const token = await auth.currentUser.getIdToken();
       const response = await fetch('/api/admin/create-user', {
@@ -56,11 +73,15 @@ function ManageUsersView() {
           <input type="text" readOnly value={data.passwordResetLink} className="w-full p-1 mt-1 text-xs bg-gray-100 border rounded" onFocus={(e) => e.target.select()} />
         </div>
       );
-      setNewName(''); setNewEmail(''); fetchUsers();
+      setNewName('');
+      setNewEmail('');
+      fetchUsers();
     } catch (err) {
       toast.error(err.message || "Falha ao criar usuário.");
       setFormMessage(<p className="font-semibold text-red-600">❌ {err.message}</p>);
-    } finally { setIsSubmitting(false); }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleRemoveUser = async (uid, email) => {
@@ -70,13 +91,51 @@ function ManageUsersView() {
       const response = await fetch(`/api/admin/users/${uid}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      toast.success(data.success); fetchUsers();
-    } catch (err) { toast.error(`Erro: ${err.message}`); }
+      toast.success(data.success);
+      fetchUsers();
+    } catch (err) {
+      toast.error(`Erro: ${err.message}`);
+    }
   };
   
-  const handleOpenEditModal = (user) => { setEditingUser(user); setIsModalOpen(true); };
-  const handleCloseModal = () => { setIsModalOpen(false); setEditingUser(null); };
-  const handleUpdateSuccess = () => { handleCloseModal(); fetchUsers(); };
+  const handleResendPassword = async (uid, email) => {
+    if (!window.confirm(`Deseja gerar um novo link de redefinição de senha para ${email}?`)) return;
+    setLinkMessage('');
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch(`/api/admin/users/${uid}/resend-password`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+
+      toast.success(data.success);
+      setLinkMessage(
+        <div>
+          <p className="font-semibold text-green-700">✅ Novo link gerado para {email}.</p>
+          <p className="mt-2 text-xs text-gray-600">Copie e envie para o funcionário:</p>
+          <input type="text" readOnly value={data.passwordResetLink} className="w-full p-1 mt-1 text-xs bg-gray-100 border rounded" onFocus={(e) => e.target.select()} />
+        </div>
+      );
+    } catch (err) {
+      toast.error(`Erro: ${err.message}`);
+      setLinkMessage(<p className="font-semibold text-red-600">❌ {err.message}</p>);
+    }
+  };
+
+  const handleOpenEditModal = (user) => {
+    setEditingUser(user);
+    setIsModalOpen(true);
+  };
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingUser(null);
+  };
+  const handleUpdateSuccess = () => {
+    handleCloseModal();
+    fetchUsers();
+  };
 
   if (reportingUser) {
     return <ReportView user={reportingUser} onBack={() => setReportingUser(null)} />;
@@ -98,7 +157,17 @@ function ManageUsersView() {
         </div>
 
         <div className="bg-white rounded-xl shadow-md border border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-700 p-6">Funcionários Cadastrados</h2>
+          <div className="p-6 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+              <h2 className="text-xl font-semibold text-gray-700">Funcionários Cadastrados</h2>
+              <input
+                  type="text"
+                  placeholder="Buscar por nome ou e-mail..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full sm:w-64 p-2 border border-gray-300 rounded-lg"
+              />
+          </div>
+          {linkMessage && <div className="mx-6 mt-4 p-3 bg-gray-50 rounded-lg border">{linkMessage}</div>}
           <div className="overflow-x-auto">
             {isLoading ? <p className="p-6 text-center text-gray-500">Carregando...</p> : error ? <p className="p-6 text-center text-red-500">{error}</p> : (
               <table className="min-w-full text-left text-sm">
@@ -109,12 +178,17 @@ function ManageUsersView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {users.map(user => (
+                  {filteredUsers.map(user => (
                     <tr key={user.uid} className="hover:bg-gray-50">
                       <td className="px-6 py-4"><p className="font-medium text-gray-900">{user.displayName || '(Sem nome)'}</p><p className="text-gray-500">{user.email}</p></td>
                       <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                         <button onClick={() => setReportingUser(user)} title="Ver Relatório" className="p-2 text-gray-500 rounded-full hover:bg-blue-100 hover:text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></button>
                         <button onClick={() => handleOpenEditModal(user)} title="Editar" className="p-2 text-gray-500 rounded-full hover:bg-indigo-100 hover:text-indigo-600"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
+                        <button onClick={() => handleResendPassword(user.uid, user.email)} title="Reenviar Redefinição de Senha" className="p-2 text-gray-500 rounded-full hover:bg-yellow-100 hover:text-yellow-600">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2l-1.5-1.5L6 16v-2h2l1.5-1.5a6 6 0 015.257-5.257" />
+                          </svg>
+                        </button>
                         <button onClick={() => handleRemoveUser(user.uid, user.email)} title="Remover" className="p-2 text-gray-500 rounded-full hover:bg-red-100 hover:text-red-600"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                       </td>
                     </tr>

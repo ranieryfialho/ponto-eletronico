@@ -271,5 +271,30 @@ app.put('/api/admin/entries/:entryId', verifyFirebaseToken, verifyAdmin, async (
   }
 });
 
+app.post('/api/admin/users/:uid/resend-password', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const user = await admin.auth().getUser(uid);
+    const email = user.email;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Usuário não possui um e-mail para redefinição de senha.' });
+    }
+    
+    const resetLink = await admin.auth().generatePasswordResetLink(email);
+    
+    res.status(200).json({ 
+      success: 'Novo link de redefinição de senha gerado com sucesso!', 
+      passwordResetLink: resetLink 
+    });
+
+  } catch (error) {
+    console.error('Erro ao reenviar link de redefinição de senha:', error);
+    if (error.code === 'auth/user-not-found') {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+    res.status(500).json({ error: 'Erro interno ao processar a solicitação.' });
+  }
+});
 
 exports.api = functions.https.onRequest(app);
