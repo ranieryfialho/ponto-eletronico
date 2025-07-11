@@ -123,7 +123,7 @@ export function ReportView({ user, onBack }) {
       for (const date in entriesByDay) {
         let clockInTime = null,
           breakStartTime = null
-        const dayOfWeek = entriesByDay[date].punches[0].time.getDay()
+        const dayOfWeek = entriesByDay[date].punches[0]?.time.getDay()
 
         entriesByDay[date].punches.forEach((entry) => {
           if (entry.status === "rejeitado") return
@@ -196,7 +196,7 @@ export function ReportView({ user, onBack }) {
       alert("Não há dados para exportar.")
       return
     }
-    const headers = ["Data", "Tipo de Registro", "Horário", "Latitude", "Longitude", "Saldo do Dia"]
+    const headers = ["Data", "Tipo de Registro", "Horário", "Unidade", "Latitude", "Longitude", "Saldo do Dia"]
     const csvRows = [headers.join(",")]
 
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
@@ -206,19 +206,20 @@ export function ReportView({ user, onBack }) {
             date,
             `"${punch.type}"`,
             punch.time.toLocaleTimeString("pt-BR"),
+            `"${punch.locationName || 'N/A'}"`,
             punch.location?.lat || "",
             punch.location?.lon || "",
             "",
           ].join(","),
         )
       })
-      csvRows.push([`"Total Trabalhado (${date})"`, "", `"${formatMillisToHours(data.totalWorkMillis)}"`])
-      csvRows.push([`"Total em Intervalo (${date})"`, "", `"${formatMillisToHours(data.totalBreakMillis)}"`])
-      csvRows.push([`"Saldo do Dia (${date})"`, "", `"${formatMillisToHours(data.dailyBalanceMillis, true)}"`])
+      csvRows.push([`"Total Trabalhado (${date})"`, "", "", `"${formatMillisToHours(data.totalWorkMillis)}"`])
+      csvRows.push([`"Total em Intervalo (${date})"`, "", "", `"${formatMillisToHours(data.totalBreakMillis)}"`])
+      csvRows.push([`"Saldo do Dia (${date})"`, "", "", `"${formatMillisToHours(data.dailyBalanceMillis, true)}"`])
       csvRows.push([])
     }
-    csvRows.push([`"Total de Horas Trabalhadas no Período"`, "", `"${reportData.grandTotal}"`])
-    csvRows.push([`"Saldo de Horas no Período"`, "", `"${reportData.grandTotalBalance}"`])
+    csvRows.push([`"Total de Horas Trabalhadas no Período"`, "", "", `"${reportData.grandTotal}"`])
+    csvRows.push([`"Saldo de Horas no Período"`, "", "", `"${reportData.grandTotalBalance}"`])
 
     const csvString = csvRows.join("\n")
     const blob = new Blob([`\uFEFF${csvString}`], { type: "text/csv;charset=utf-8;" })
@@ -252,19 +253,26 @@ export function ReportView({ user, onBack }) {
     doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 30)
     doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 36)
 
-    const tableHeaders = [["Data", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
+    const tableHeaders = [["Data", "Unidade", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
     const tableData = []
 
     for (const [date, data] of Object.entries(reportData.groupedEntries)) {
       const entryTime = data.punches.find((p) => p.type === "Entrada")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const breakStartTime =
-        data.punches.find((p) => p.type === "Início do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const breakEndTime =
-        data.punches.find((p) => p.type === "Fim do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+      const breakStartTime = data.punches.find((p) => p.type === "Início do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+      const breakEndTime = data.punches.find((p) => p.type === "Fim do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
       const exitTime = data.punches.find((p) => p.type === "Saída")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
       const totalWork = formatMillisToHours(data.totalWorkMillis)
       const dailyBalance = formatMillisToHours(data.dailyBalanceMillis, true)
-      tableData.push([date, entryTime, breakStartTime, breakEndTime, exitTime, totalWork, dailyBalance])
+
+      const locations = new Set(data.punches.map(p => p.locationName).filter(Boolean));
+      let unitDisplay = "N/D";
+      if (locations.size === 1) {
+        unitDisplay = Array.from(locations)[0];
+      } else if (locations.size > 1) {
+        unitDisplay = "Múltiplas";
+      }
+
+      tableData.push([date, unitDisplay, entryTime, breakStartTime, breakEndTime, exitTime, totalWork, dailyBalance])
     }
 
     autoTable(doc, {
@@ -503,83 +511,51 @@ export function ReportView({ user, onBack }) {
                           </p>
                         </div>
                       </div>
-                      <ul className="divide-y divide-gray-200">
-                        {data.punches.map((entry) => {
-                          const timeColorClass = getPunchStatusColor(entry.type, entry.time)
-                          const isRejected = entry.status === "rejeitado"
-                          return (
-                            <li key={entry.id} className={`py-3 ${isRejected ? "bg-red-50" : ""}`}>
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <span className={`font-medium text-gray-800 ${isRejected ? "line-through" : ""}`}>
+
+                      <div className="mt-4 border-t pt-2">
+                         <div className="grid grid-cols-5 gap-4 px-3 py-2 text-xs font-bold text-gray-500 uppercase">
+                           <div className="col-span-2">Tipo</div>
+                           <div className="col-span-1">Unidade</div>
+                           <div className="col-span-2 text-right">Horário</div>
+                         </div>
+                        <ul className="divide-y divide-gray-200">
+                          {data.punches.map((entry) => {
+                            const timeColorClass = getPunchStatusColor(entry.type, entry.time)
+                            const isRejected = entry.status === "rejeitado"
+                            return (
+                              <li key={entry.id} className={`py-3 px-3 ${isRejected ? "bg-red-50" : ""}`}>
+                                <div className="grid grid-cols-5 gap-4 items-center">
+                                  <div className={`col-span-2 font-medium ${isRejected ? "line-through text-red-600" : "text-gray-800"}`}>
                                     {entry.type}
-                                  </span>
+                                  </div>
+                                  <div className={`col-span-1 text-sm ${isRejected ? "line-through text-red-500" : "text-gray-600"}`}>
+                                    {entry.locationName || 'N/D'}
+                                  </div>
+                                  <div className="col-span-2 flex items-center justify-end gap-2 sm:gap-4">
+                                    <button onClick={() => handleOpenEditPunchModal(entry)} title="Editar Registro" className="p-1 text-gray-400 hover:text-indigo-600 rounded-full">
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                    </button>
+                                    <button onClick={() => handleShowOnMap(entry.location)} title="Ver localização no mapa" className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full">
+                                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                    </button>
+                                    <span className={`font-mono text-lg ${isRejected ? "text-red-600 line-through" : timeColorClass}`}>
+                                      {entry.time.toLocaleTimeString("pt-BR")}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-4">
-                                  <button
-                                    onClick={() => handleOpenEditPunchModal(entry)}
-                                    title="Editar Registro"
-                                    className="p-1 text-gray-400 hover:text-indigo-600 rounded-full"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-5 w-5"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                                      />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    onClick={() => handleShowOnMap(entry.location)}
-                                    title="Ver localização no mapa"
-                                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-100 rounded-full"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-5 w-5"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                                      />
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                                      />
-                                    </svg>
-                                  </button>
-                                  <span
-                                    className={`font-mono text-lg ${isRejected ? "text-red-600 line-through" : timeColorClass}`}
-                                  >
-                                    {entry.time.toLocaleTimeString("pt-BR")}
-                                  </span>
-                                </div>
-                              </div>
-                              {entry.isEdited && (
-                                <p className="text-xs text-indigo-700 mt-1 pl-1">
-                                  Editado pelo gestor. Motivo: {entry.editReason}
-                                </p>
-                              )}
-                              {isRejected && entry.rejectionReason && (
-                                <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
-                              )}
-                            </li>
-                          )
-                        })}
-                      </ul>
+                                {entry.isEdited && (
+                                  <p className="text-xs text-indigo-700 mt-1 pl-1">
+                                    Editado pelo gestor. Motivo: {entry.editReason}
+                                  </p>
+                                )}
+                                {isRejected && entry.rejectionReason && (
+                                  <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
                     </div>
                   )
                 })

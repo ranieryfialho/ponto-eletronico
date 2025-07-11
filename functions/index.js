@@ -8,9 +8,9 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
-const NEW_BRANCH_COORDS = { lat: -3.8357003292097605, lon: -38.485334159487145 };
-
+// --- CONSTANTES DE LOCALIZAÇÃO ---
+const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 }; // Matriz (Bezerra)
+const NEW_BRANCH_COORDS = { lat: -3.835700, lon: -38.485334 }; // Filial (Messejana) 
 const ALLOWED_RADIUS_METERS = 300;
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 
@@ -19,7 +19,8 @@ const verifyFirebaseToken = async (req, res, next) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) { return res.status(401).json({ error: 'Acesso não autorizado. Token não fornecido.' }); }
   const idToken = authHeader.split('Bearer ')[1];
   try {
-    req.user = await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
     next();
   } catch (error) {
     console.error('Erro ao verificar token:', error);
@@ -27,11 +28,23 @@ const verifyFirebaseToken = async (req, res, next) => {
   }
 };
 
-const verifyAdmin = (req, res, next) => {
-  if (req.user.admin === true) { return next(); }
-  return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
+const verifyAdmin = async (req, res, next) => {
+    try {
+        const user = await admin.auth().getUser(req.user.uid);
+        if (user.customClaims && user.customClaims.admin === true) {
+            req.user.admin = true;
+            return next();
+        }
+        return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
+    } catch (error) {
+        console.error('Erro ao verificar permissões de admin:', error);
+        return res.status(500).json({ error: 'Erro ao verificar permissões.' });
+    }
 };
 
+// --- ROTAS DA API ---
+
+// ROTA DE REGISTRO DE PONTO ATUALIZADA
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -39,37 +52,71 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
     const requestIp = req.ip;
     const now = new Date();
 
-    const lastEntryQuery = await db.collection('timeEntries')
-      .where('userId', '==', userId)
-      .orderBy('timestamp', 'desc')
-      .limit(1)
-      .get();
+    const employeeDoc = await db.collection('employees').doc(userId).get();
+    if (!employeeDoc.exists) {
+        return res.status(404).json({ error: 'Perfil de funcionário não encontrado.' });
+    }
+    const employeeProfile = employeeDoc.data();
+    const allowedLocation = employeeProfile.allowedLocation || 'matriz';
 
+    const lastEntryQuery = await db.collection('timeEntries').where('userId', '==', userId).orderBy('timestamp', 'desc').limit(1).get();
     if (!lastEntryQuery.empty) {
-      const lastEntry = lastEntryQuery.docs[0].data();
-      const lastTimestamp = lastEntry.timestamp.toDate().getTime();
+      const lastTimestamp = lastEntryQuery.docs[0].data().timestamp.toDate().getTime();
       const diff = now.getTime() - lastTimestamp;
       if (diff < TEN_MINUTES_IN_MS) {
         return res.status(429).json({ error: `Aguarde mais ${Math.ceil((TEN_MINUTES_IN_MS - diff) / 1000)} segundos para registrar novamente.` });
       }
     }
 
-    const distanceToSchool = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
-    const distanceToNewBranch = getDistanceInMeters(location.lat, location.lon, NEW_BRANCH_COORDS.lat, NEW_BRANCH_COORDS.lon);
+    const distanceToMatriz = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
+    const distanceToFilial = getDistanceInMeters(location.lat, location.lon, NEW_BRANCH_COORDS.lat, NEW_BRANCH_COORDS.lon);
 
-    if (distanceToSchool > ALLOWED_RADIUS_METERS && distanceToNewBranch > ALLOWED_RADIUS_METERS) {
-      const minDistance = Math.min(distanceToSchool, distanceToNewBranch);
-      return res.status(400).json({ error: `Você está a ${minDistance.toFixed(0)}m de distância da unidade mais próxima.` });
+    let isValidLocation = false;
+    let locationName = null;
+
+    switch (allowedLocation) {
+      case 'matriz':
+        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+          isValidLocation = true;
+          locationName = 'Matriz (Bezerra)';
+        }
+        break;
+      case 'filial':
+        if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
+          isValidLocation = true;
+          locationName = 'Filial (Messejana)';
+        }
+        break;
+      case 'ambas':
+        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+          isValidLocation = true;
+          locationName = 'Matriz (Bezerra)';
+        } else if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
+          isValidLocation = true;
+          locationName = 'Filial (Messejana)';
+        }
+        break;
+      default:
+        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+          isValidLocation = true;
+          locationName = 'Matriz (Bezerra)';
+        }
+    }
+
+    if (!isValidLocation) {
+      const minDistance = Math.min(distanceToMatriz, distanceToFilial);
+      return res.status(400).json({ 
+        error: `Você não tem permissão para esta unidade ou está fora do raio permitido. Unidade mais próxima a ${minDistance.toFixed(0)}m.` 
+      });
     }
 
     let entryStatus = 'aprovado';
     let successMessage = `Registro de '${type}' realizado com sucesso!`;
 
     if (type === 'Entrada') {
-      const employeeDoc = await db.collection('employees').doc(userId).get();
-      if (employeeDoc.exists && employeeDoc.data().workHours) {
-        const schedule = employeeDoc.data().workHours;
-        const dayOfWeek = now.getUTCDay();
+      if (employeeProfile.workHours) {
+        const schedule = employeeProfile.workHours;
+        const dayOfWeek = now.getDay();
         let scheduledTimeString = null;
 
         if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
@@ -80,10 +127,10 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
         if (scheduledTimeString) {
           const [hours, minutes] = scheduledTimeString.split(':').map(Number);
-          const scheduledTimeUTC = new Date();
-          scheduledTimeUTC.setUTCFullYear(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-          scheduledTimeUTC.setUTCHours(hours + 3, minutes, 0, 0); // Ajuste para UTC-3
-          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeUTC.getTime()) / 60000);
+          const scheduledTimeToday = new Date();
+          scheduledTimeToday.setHours(hours, minutes, 0, 0);
+          
+          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeToday.getTime()) / 60000);
 
           if (latenessMinutes > 120) {
             if (!justification) {
@@ -98,9 +145,10 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     const timeRecord = {
       userId: userId,
-      displayName: req.user.name || req.user.email,
+      displayName: req.user.name || employeeProfile.displayName || req.user.email,
       timestamp: now,
       location: location,
+      locationName: locationName,
       type: type,
       validatedIp: requestIp,
       status: entryStatus,
@@ -170,10 +218,19 @@ app.get('/api/admin/employees/:uid', verifyFirebaseToken, verifyAdmin, async (re
 app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const { uid } = req.params;
-    const { email, displayName, cpf, cargo, workHours } = req.body;
+    const { email, displayName, cpf, cargo, workHours, allowedLocation } = req.body;
     if (!email || !displayName) { return res.status(400).json({ error: 'E-mail e Nome são obrigatórios.' }); }
     await admin.auth().updateUser(uid, { email: email, displayName: displayName, });
-    const employeeProfile = { displayName, email, cpf: cpf || null, cargo: cargo || null, workHours: workHours || null, };
+
+    const employeeProfile = { 
+        displayName, 
+        email, 
+        cpf: cpf || null, 
+        cargo: cargo || null, 
+        workHours: workHours || null,
+        allowedLocation: allowedLocation || 'matriz'
+    };
+
     await db.collection('employees').doc(uid).set(employeeProfile, { merge: true });
     res.status(200).json({ success: 'Usuário atualizado com sucesso!' });
   } catch (error) {
@@ -182,6 +239,7 @@ app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, r
     res.status(500).json({ error: 'Erro interno ao atualizar usuário.' });
   }
 });
+
 
 app.get('/api/admin/reports/time-entries', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {

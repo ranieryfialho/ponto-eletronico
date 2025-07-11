@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { auth } from '../firebase-config';
 import { toast } from 'react-toastify';
-import { Fragment } from 'react';
 
 export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
   const [cargo, setCargo] = useState('');
+  const [allowedLocation, setAllowedLocation] = useState('matriz');
 
   const [workHours, setWorkHours] = useState({
     weekday: { entry: '08:00', breakStart: '12:00', breakEnd: '13:00', exit: '18:00' },
@@ -33,6 +33,8 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
           const profileData = await response.json();
           setCpf(profileData.cpf || '');
           setCargo(profileData.cargo || '');
+          setAllowedLocation(profileData.allowedLocation || 'matriz');
+
           if (profileData.workHours) {
             setWorkHours({
               weekday: profileData.workHours.weekday || { entry: '08:00', breakStart: '12:00', breakEnd: '13:00', exit: '18:00' },
@@ -72,7 +74,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
       await fetch(`/api/admin/users/${user.uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ displayName, email, cpf, cargo, workHours }),
+        body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocation }),
       });
       toast.success("Perfil do funcionário atualizado!");
       onSuccess();
@@ -106,6 +108,24 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                       <div><label htmlFor="email" className="block text-sm font-medium text-gray-700">E-mail</label><input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"/></div>
                       <div><label htmlFor="cpf" className="block text-sm font-medium text-gray-700">CPF</label><input id="cpf" type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"/></div>
                       <div><label htmlFor="cargo" className="block text-sm font-medium text-gray-700">Cargo</label><input id="cargo" type="text" value={cargo} onChange={(e) => setCargo(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"/></div>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                      <h3 className="text-md font-semibold text-gray-700">Local de Ponto Permitido</h3>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2">
+                        <div className="flex items-center">
+                          <input id="loc-matriz" name="location" type="radio" value="matriz" checked={allowedLocation === 'matriz'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
+                          <label htmlFor="loc-matriz" className="ml-2 block text-sm text-gray-900">Apenas Matriz</label>
+                        </div>
+                        <div className="flex items-center">
+                          <input id="loc-filial" name="location" type="radio" value="filial" checked={allowedLocation === 'filial'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
+                          <label htmlFor="loc-filial" className="ml-2 block text-sm text-gray-900">Apenas Filial</label>
+                        </div>
+                        <div className="flex items-center">
+                          <input id="loc-ambas" name="location" type="radio" value="ambas" checked={allowedLocation === 'ambas'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
+                          <label htmlFor="loc-ambas" className="ml-2 block text-sm text-gray-900">Ambas</label>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="pt-4 border-t">
