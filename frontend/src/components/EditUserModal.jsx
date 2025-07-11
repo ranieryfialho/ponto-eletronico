@@ -9,6 +9,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
   const [cpf, setCpf] = useState('');
   const [cargo, setCargo] = useState('');
   const [allowedLocation, setAllowedLocation] = useState('matriz');
+  const [status, setStatus] = useState('ativo');
 
   const [workHours, setWorkHours] = useState({
     weekday: { entry: '08:00', breakStart: '12:00', breakEnd: '13:00', exit: '18:00' },
@@ -34,6 +35,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
           setCpf(profileData.cpf || '');
           setCargo(profileData.cargo || '');
           setAllowedLocation(profileData.allowedLocation || 'matriz');
+          setStatus(profileData.status || 'ativo');
 
           if (profileData.workHours) {
             setWorkHours({
@@ -74,7 +76,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
       await fetch(`/api/admin/users/${user.uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocation }),
+        body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocation, status }),
       });
       toast.success("Perfil do funcionário atualizado!");
       onSuccess();
@@ -108,6 +110,25 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                       <div><label htmlFor="email" className="block text-sm font-medium text-gray-700">E-mail</label><input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"/></div>
                       <div><label htmlFor="cpf" className="block text-sm font-medium text-gray-700">CPF</label><input id="cpf" type="text" value={cpf} onChange={(e) => setCpf(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"/></div>
                       <div><label htmlFor="cargo" className="block text-sm font-medium text-gray-700">Cargo</label><input id="cargo" type="text" value={cargo} onChange={(e) => setCargo(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"/></div>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                      <label htmlFor="status" className="block text-sm font-medium text-gray-700">
+                        Situação do Funcionário
+                      </label>
+                      <select
+                        id="status"
+                        name="status"
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-2 pl-3 pr-10"
+                      >
+                        <option value="ativo">Ativo</option>
+                        <option value="inativo">Inativo</option>
+                      </select>
+                      <p className="mt-2 text-xs text-gray-500">
+                        Funcionários inativos são destacados na lista e não podem registrar ponto.
+                      </p>
                     </div>
 
                     <div className="pt-4 border-t">

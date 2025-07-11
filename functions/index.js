@@ -8,9 +8,8 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// --- CONSTANTES DE LOCALIZAÇÃO ---
-const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 }; // Matriz (Bezerra)
-const NEW_BRANCH_COORDS = { lat: -3.835700, lon: -38.485334 }; // Filial (Messejana) 
+const SCHOOL_COORDS = { lat: -3.7337448439285126, lon: -38.557118899994045 };
+const NEW_BRANCH_COORDS = { lat: -3.8357003292097605, lon: -38.485334159487145 };
 const ALLOWED_RADIUS_METERS = 300;
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 
@@ -42,16 +41,13 @@ const verifyAdmin = async (req, res, next) => {
     }
 };
 
-// --- ROTAS DA API ---
-
-// ROTA DE REGISTRO DE PONTO ATUALIZADA
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
     const { location, type, justification } = req.body;
     const requestIp = req.ip;
     const now = new Date();
-
+    
     const employeeDoc = await db.collection('employees').doc(userId).get();
     if (!employeeDoc.exists) {
         return res.status(404).json({ error: 'Perfil de funcionário não encontrado.' });
@@ -78,31 +74,31 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       case 'matriz':
         if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
           isValidLocation = true;
-          locationName = 'Matriz (Bezerra)';
+          locationName = 'Matriz';
         }
         break;
       case 'filial':
         if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
           isValidLocation = true;
-          locationName = 'Filial (Messejana)';
+          locationName = 'Filial';
         }
         break;
       case 'ambas':
         if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
           isValidLocation = true;
-          locationName = 'Matriz (Bezerra)';
+          locationName = 'Matriz';
         } else if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
           isValidLocation = true;
-          locationName = 'Filial (Messejana)';
+          locationName = 'Filial';
         }
         break;
       default:
         if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
           isValidLocation = true;
-          locationName = 'Matriz (Bezerra)';
+          locationName = 'Matriz';
         }
     }
-
+    
     if (!isValidLocation) {
       const minDistance = Math.min(distanceToMatriz, distanceToFilial);
       return res.status(400).json({ 
@@ -167,8 +163,22 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const listUsersResult = await admin.auth().listUsers(1000);
-    const users = listUsersResult.users.map(userRecord => ({ uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName, }));
-    res.status(200).json(users);
+    
+    const usersWithProfile = await Promise.all(listUsersResult.users.map(async (userRecord) => {
+      const employeeDoc = await db.collection('employees').doc(userRecord.uid).get();
+      const profileData = employeeDoc.exists ? employeeDoc.data() : {};
+      
+      return {
+        uid: userRecord.uid,
+        email: userRecord.email,
+        displayName: userRecord.displayName,
+        // Adiciona os novos campos para as tags
+        status: profileData.status || 'ativo', // Retorna 'ativo' por padrão
+        location: profileData.allowedLocation || 'matriz' // Retorna 'matriz' por padrão
+      };
+    }));
+    
+    res.status(200).json(usersWithProfile);
   } catch (error) {
     console.error('Erro ao listar usuários:', error);
     res.status(500).json({ error: 'Erro interno ao buscar lista de usuários.' });
@@ -218,17 +228,18 @@ app.get('/api/admin/employees/:uid', verifyFirebaseToken, verifyAdmin, async (re
 app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const { uid } = req.params;
-    const { email, displayName, cpf, cargo, workHours, allowedLocation } = req.body;
+    const { email, displayName, cpf, cargo, workHours, allowedLocation, status } = req.body;
     if (!email || !displayName) { return res.status(400).json({ error: 'E-mail e Nome são obrigatórios.' }); }
     await admin.auth().updateUser(uid, { email: email, displayName: displayName, });
-
+    
     const employeeProfile = { 
         displayName, 
         email, 
         cpf: cpf || null, 
         cargo: cargo || null, 
         workHours: workHours || null,
-        allowedLocation: allowedLocation || 'matriz'
+        allowedLocation: allowedLocation || 'matriz',
+        status: status || 'ativo' // Salva o status, com 'ativo' como padrão
     };
 
     await db.collection('employees').doc(uid).set(employeeProfile, { merge: true });
@@ -239,7 +250,6 @@ app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, r
     res.status(500).json({ error: 'Erro interno ao atualizar usuário.' });
   }
 });
-
 
 app.get('/api/admin/reports/time-entries', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {

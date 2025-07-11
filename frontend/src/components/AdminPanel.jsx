@@ -5,6 +5,21 @@ import { ReportView } from './ReportView';
 import { PendingApprovals } from './PendingApprovals';
 import { toast } from 'react-toastify';
 
+const Tag = ({ text, color }) => {
+  const colorClasses = {
+    green: 'bg-green-100 text-green-800',
+    red: 'bg-red-100 text-red-800',
+    blue: 'bg-blue-100 text-blue-800',
+    purple: 'bg-purple-100 text-purple-800',
+    yellow: 'bg-yellow-100 text-yellow-800',
+  };
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colorClasses[color]}`}>
+      {text}
+    </span>
+  );
+};
+
 function ManageUsersView() {
   const [reportingUser, setReportingUser] = useState(null);
   const [users, setUsers] = useState([]);
@@ -51,6 +66,19 @@ function ManageUsersView() {
       (user.email && user.email.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [users, searchTerm]);
+
+  const getLocationTag = (location) => {
+    switch (location) {
+      case 'matriz':
+        return <Tag text="Matriz" color="blue" />;
+      case 'filial':
+        return <Tag text="Filial" color="purple" />;
+      case 'ambas':
+        return <Tag text="Ambas" color="yellow" />;
+      default:
+        return <Tag text="Matriz" color="blue" />;
+    }
+  };
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -180,7 +208,18 @@ function ManageUsersView() {
                 <tbody className="divide-y divide-gray-200">
                   {filteredUsers.map(user => (
                     <tr key={user.uid} className="hover:bg-gray-50">
-                      <td className="px-6 py-4"><p className="font-medium text-gray-900">{user.displayName || '(Sem nome)'}</p><p className="text-gray-500">{user.email}</p></td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                           <p className="font-medium text-gray-900">{user.displayName || '(Sem nome)'}</p>
+                           {user.status === 'ativo' ? (
+                                <Tag text="Ativo" color="green" />
+                            ) : (
+                                <Tag text="Inativo" color="red" />
+                            )}
+                           {getLocationTag(user.location)}
+                        </div>
+                        <p className="text-gray-500 mt-1">{user.email}</p>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                         <button onClick={() => setReportingUser(user)} title="Ver Relatório" className="p-2 text-gray-500 rounded-full hover:bg-blue-100 hover:text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></button>
                         <button onClick={() => handleOpenEditModal(user)} title="Editar" className="p-2 text-gray-500 rounded-full hover:bg-indigo-100 hover:text-indigo-600"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
