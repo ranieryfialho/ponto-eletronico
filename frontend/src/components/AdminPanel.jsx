@@ -12,6 +12,7 @@ const Tag = ({ text, color }) => {
     blue: 'bg-blue-100 text-blue-800',
     purple: 'bg-purple-100 text-purple-800',
     yellow: 'bg-yellow-100 text-yellow-800',
+    orange: 'bg-orange-100 text-orange-800',
   };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colorClasses[color]}`}>
@@ -75,6 +76,8 @@ function ManageUsersView() {
         return <Tag text="Filial" color="purple" />;
       case 'ambas':
         return <Tag text="Ambas" color="yellow" />;
+      case 'externo':
+        return <Tag text="Externo" color="orange" />;
       default:
         return <Tag text="Matriz" color="blue" />;
     }

@@ -132,21 +132,24 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                     </div>
 
                     <div className="pt-4 border-t">
-                      <h3 className="text-md font-semibold text-gray-700">Local de Ponto Permitido</h3>
-                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-2">
-                        <div className="flex items-center">
-                          <input id="loc-matriz" name="location" type="radio" value="matriz" checked={allowedLocation === 'matriz'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
-                          <label htmlFor="loc-matriz" className="ml-2 block text-sm text-gray-900">Apenas Matriz</label>
-                        </div>
-                        <div className="flex items-center">
-                          <input id="loc-filial" name="location" type="radio" value="filial" checked={allowedLocation === 'filial'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
-                          <label htmlFor="loc-filial" className="ml-2 block text-sm text-gray-900">Apenas Filial</label>
-                        </div>
-                        <div className="flex items-center">
-                          <input id="loc-ambas" name="location" type="radio" value="ambas" checked={allowedLocation === 'ambas'} onChange={(e) => setAllowedLocation(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/>
-                          <label htmlFor="loc-ambas" className="ml-2 block text-sm text-gray-900">Ambas</label>
-                        </div>
-                      </div>
+                      <label htmlFor="location" className="block text-sm font-medium text-gray-700">
+                        Local de Ponto Permitido
+                      </label>
+                      <select
+                        id="location"
+                        name="location"
+                        value={allowedLocation}
+                        onChange={(e) => setAllowedLocation(e.target.value)}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-2 pl-3 pr-10"
+                      >
+                        <option value="matriz">Apenas Matriz</option>
+                        <option value="filial">Apenas Filial</option>
+                        <option value="ambas">Ambas</option>
+                        <option value="externo">Externo</option>
+                      </select>
+                      <p className="mt-2 text-xs text-gray-500">
+                        Colaboradores 'Externo' podem registrar o ponto em qualquer localização.
+                      </p>
                     </div>
 
                     <div className="pt-4 border-t">

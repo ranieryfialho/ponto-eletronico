@@ -66,46 +66,51 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       }
     }
 
-    const distanceToMatriz = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
-    const distanceToFilial = getDistanceInMeters(location.lat, location.lon, NEW_BRANCH_COORDS.lat, NEW_BRANCH_COORDS.lon);
-
     let isValidLocation = false;
     let locationName = null;
 
-    switch (allowedLocation) {
-      case 'matriz':
-        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
-          isValidLocation = true;
-          locationName = 'Matriz';
+    if (allowedLocation === 'externo') {
+        isValidLocation = true;
+        locationName = 'Externo';
+    } else {
+        const distanceToMatriz = getDistanceInMeters(location.lat, location.lon, SCHOOL_COORDS.lat, SCHOOL_COORDS.lon);
+        const distanceToFilial = getDistanceInMeters(location.lat, location.lon, NEW_BRANCH_COORDS.lat, NEW_BRANCH_COORDS.lon);
+
+        switch (allowedLocation) {
+          case 'matriz':
+            if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+              isValidLocation = true;
+              locationName = 'Matriz';
+            }
+            break;
+          case 'filial':
+            if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
+              isValidLocation = true;
+              locationName = 'Filial';
+            }
+            break;
+          case 'ambas':
+            if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+              isValidLocation = true;
+              locationName = 'Matriz';
+            } else if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
+              isValidLocation = true;
+              locationName = 'Filial';
+            }
+            break;
+          default:
+            if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
+              isValidLocation = true;
+              locationName = 'Matriz';
+            }
         }
-        break;
-      case 'filial':
-        if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
-          isValidLocation = true;
-          locationName = 'Filial';
+        
+        if (!isValidLocation) {
+          const minDistance = Math.min(distanceToMatriz, distanceToFilial);
+          return res.status(400).json({ 
+            error: `Você não tem permissão para esta unidade ou está fora do raio permitido. Unidade mais próxima a ${minDistance.toFixed(0)}m.` 
+          });
         }
-        break;
-      case 'ambas':
-        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
-          isValidLocation = true;
-          locationName = 'Matriz';
-        } else if (distanceToFilial <= ALLOWED_RADIUS_METERS) {
-          isValidLocation = true;
-          locationName = 'Filial';
-        }
-        break;
-      default:
-        if (distanceToMatriz <= ALLOWED_RADIUS_METERS) {
-          isValidLocation = true;
-          locationName = 'Matriz';
-        }
-    }
-    
-    if (!isValidLocation) {
-      const minDistance = Math.min(distanceToMatriz, distanceToFilial);
-      return res.status(400).json({ 
-        error: `Você não tem permissão para esta unidade ou está fora do raio permitido. Unidade mais próxima a ${minDistance.toFixed(0)}m.` 
-      });
     }
 
     let entryStatus = 'aprovado';
