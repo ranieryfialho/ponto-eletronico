@@ -4,6 +4,8 @@ const cors = require('cors');
 const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
 
+process.env.TZ = 'America/Fortaleza';
+
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
@@ -172,9 +174,8 @@ app.get('/api/admin/users', verifyFirebaseToken, verifyAdmin, async (req, res) =
         uid: userRecord.uid,
         email: userRecord.email,
         displayName: userRecord.displayName,
-        // Adiciona os novos campos para as tags
-        status: profileData.status || 'ativo', // Retorna 'ativo' por padrão
-        location: profileData.allowedLocation || 'matriz' // Retorna 'matriz' por padrão
+        status: profileData.status || 'ativo', 
+        location: profileData.allowedLocation || 'matriz'
       };
     }));
     
@@ -239,7 +240,7 @@ app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, r
         cargo: cargo || null, 
         workHours: workHours || null,
         allowedLocation: allowedLocation || 'matriz',
-        status: status || 'ativo' // Salva o status, com 'ativo' como padrão
+        status: status || 'ativo'
     };
 
     await db.collection('employees').doc(uid).set(employeeProfile, { merge: true });
