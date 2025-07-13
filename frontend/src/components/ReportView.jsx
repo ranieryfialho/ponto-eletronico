@@ -184,12 +184,12 @@ export function ReportView({ user, onBack }) {
 
   const handleShowOnMap = (location) => {
     if (location && location.lat && location.lon) {
-      const url = `https://www.google.com/maps?q=${location.lat},${location.lon}`;
-      window.open(url, "_blank", "noopener,noreferrer");
+      const url = `https://maps.google.com/?cid=170535968932282901497${location.lat},${location.lon}`
+      window.open(url, "_blank", "noopener,noreferrer")
     } else {
-      toast.error("Coordenadas não encontradas para este registro.");
+      toast.error("Coordenadas não encontradas para este registro.")
     }
-  };
+  }
 
   const handleExportCSV = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) {
@@ -513,11 +513,11 @@ export function ReportView({ user, onBack }) {
                       </div>
 
                       <div className="mt-4 border-t pt-2">
-                        <div className="grid grid-cols-5 gap-4 px-3 py-2 text-xs font-bold text-gray-500 uppercase">
-                          <div className="col-span-2">Tipo</div>
-                          <div className="col-span-1">Unidade</div>
-                          <div className="col-span-2 text-right">Horário</div>
-                        </div>
+                         <div className="grid grid-cols-5 gap-4 px-3 py-2 text-xs font-bold text-gray-500 uppercase">
+                           <div className="col-span-2">Tipo</div>
+                           <div className="col-span-1">Unidade</div>
+                           <div className="col-span-2 text-right">Horário</div>
+                         </div>
                         <ul className="divide-y divide-gray-200">
                           {data.punches.map((entry) => {
                             const timeColorClass = getPunchStatusColor(entry.type, entry.time)
@@ -543,14 +543,23 @@ export function ReportView({ user, onBack }) {
                                     </span>
                                   </div>
                                 </div>
+                                
                                 {entry.isEdited && (
                                   <p className="text-xs text-indigo-700 mt-1 pl-1">
                                     Editado pelo gestor. Motivo: {entry.editReason}
                                   </p>
                                 )}
                                 {isRejected && entry.rejectionReason && (
-                                  <p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>
+                                  <p className="text-xs text-red-700 mt-1 pl-1">
+                                    Motivo da Rejeição: {entry.rejectionReason}
+                                  </p>
                                 )}
+                                {entry.justification && (
+                                  <p className="text-xs text-blue-700 mt-1 pl-1 italic">
+                                    Justificativa do Funcionário: "{entry.justification}"
+                                  </p>
+                                )}
+
                               </li>
                             )
                           })}
