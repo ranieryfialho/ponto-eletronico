@@ -3,6 +3,7 @@ import { auth } from '../firebase-config';
 import { EditUserModal } from './EditUserModal';
 import { ReportView } from './ReportView';
 import { PendingApprovals } from './PendingApprovals';
+import { CompanyProfile } from './CompanyProfile';
 import { toast } from 'react-toastify';
 
 const Tag = ({ text, color }) => {
@@ -255,11 +256,13 @@ export function AdminPanel({ onBack }) {
         return <ManageUsersView />;
       case 'approvals':
         return <PendingApprovals />;
+      case 'company':
+        return <CompanyProfile />;
       default:
         return (
           <div className="space-y-6">
             <p className="text-center text-gray-600">Selecione uma das opções abaixo para continuar.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <button onClick={() => setView('approvals')} className="text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
                 <h3 className="text-lg font-semibold text-gray-800">Aprovações Pendentes</h3>
                 <p className="text-sm text-gray-500">Valide os registros de ponto atrasados.</p>
@@ -268,6 +271,10 @@ export function AdminPanel({ onBack }) {
                 <h3 className="text-lg font-semibold text-gray-800">Gerenciar Funcionários</h3>
                 <p className="text-sm text-gray-500">Adicione, remova, edite e veja relatórios.</p>
               </button>
+              <button onClick={() => setView('company')} className="text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+                <h3 className="text-lg font-semibold text-gray-800">Minha Empresa</h3>
+                <p className="text-sm text-gray-500">Cadastre os dados e os locais de ponto.</p>
+              </button>
             </div>
           </div>
         );
@@ -275,7 +282,7 @@ export function AdminPanel({ onBack }) {
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-8">
+    <div className="w-full max-w-4xl mx-auto space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800">Painel do Administrador</h1>
         <button onClick={view === 'menu' ? onBack : () => setView('menu')} className="flex items-center gap-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 hover:bg-gray-100 px-3 py-2 rounded-lg shadow-sm">
