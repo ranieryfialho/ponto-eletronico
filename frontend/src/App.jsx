@@ -32,7 +32,7 @@ function App() {
   const [timeHistory, setTimeHistory] = useState([])
   const [employeeProfile, setEmployeeProfile] = useState(null)
   const [userStatus, setUserStatus] = useState(STATUS.LOADING)
-  const [message, setMessage] = useState("Bem-vindo!")
+  const [message, setMessage] = useState("Conectando...")
   const [isLoading, setIsLoading] = useState(false)
   const [isJustificationModalOpen, setIsJustificationModalOpen] = useState(false)
   const [lateEntryLocation, setLateEntryLocation] = useState(null)
@@ -98,10 +98,14 @@ function App() {
 
   useEffect(() => {
     if (!user) {
-      setUserStatus(STATUS.CLOCKED_OUT)
-      setTimeHistory([])
-      return
+      setUserStatus(STATUS.CLOCKED_OUT);
+      setTimeHistory([]);
+      setMessage("Por favor, faça o login.");
+      return;
     }
+
+    setUserStatus(STATUS.LOADING);
+    setMessage("Buscando seu último registro...");
 
     const q = query(
         collection(db, "timeEntries"),
@@ -112,33 +116,44 @@ function App() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const entries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-        setTimeHistory(entries)
+        const entries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setTimeHistory(entries);
 
-        const lastValidEntry = entries.find((e) => e.status !== "rejeitado")
-        if (!lastValidEntry) {
-          setUserStatus(STATUS.CLOCKED_OUT)
-          setLastEntryTimestamp(null)
-        } else {
+        const lastValidEntry = entries.find((e) => e.status !== "rejeitado");
+        let newStatus = STATUS.CLOCKED_OUT;
+        let newMessage = "Pronto para iniciar o expediente!"; 
+
+        if (lastValidEntry) {
           setLastEntryTimestamp(lastValidEntry.timestamp.seconds * 1000);
-          const lastEntryType = lastValidEntry.type
+          const lastEntryType = lastValidEntry.type;
+          
           if (lastEntryType === ENTRY_TYPES.CLOCK_IN || lastEntryType === ENTRY_TYPES.BREAK_END) {
-            setUserStatus(STATUS.WORKING)
+            newStatus = STATUS.WORKING;
+            newMessage = "Em expediente. Bom trabalho!";
           } else if (lastEntryType === ENTRY_TYPES.BREAK_START) {
-            setUserStatus(STATUS.ON_BREAK)
+            newStatus = STATUS.ON_BREAK;
+            newMessage = "Em intervalo.";
           } else if (lastEntryType === ENTRY_TYPES.CLOCK_OUT) {
-            setUserStatus(STATUS.CLOCKED_OUT)
+            newStatus = STATUS.CLOCKED_OUT;
+            newMessage = "Expediente encerrado. Até a próxima!";
           }
+        } else {
+            setLastEntryTimestamp(null);
         }
+        
+        setUserStatus(newStatus);
+        setMessage(newMessage); // Atualiza a mensagem com o status real
       },
       (error) => {
-        console.error("Erro ao buscar histórico de ponto:", error)
-        toast.error("Não foi possível carregar seu histórico de ponto.")
+        console.error("Erro ao buscar histórico de ponto:", error);
+        toast.error("Não foi possível carregar seu histórico de ponto.");
+        setUserStatus(STATUS.CLOCKED_OUT); // Define um estado seguro em caso de erro
+        setMessage("❌ Erro ao buscar histórico.");
       },
-    )
+    );
 
-    return () => unsubscribe()
-  }, [user])
+    return () => unsubscribe();
+  }, [user]);
 
   const groupedHistory = useMemo(() => {
     if (timeHistory.length === 0) return {}
@@ -279,7 +294,7 @@ function App() {
       default:
         return (
           <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">
-            Carregando status...
+            Verificando status...
           </button>
         )
     }
