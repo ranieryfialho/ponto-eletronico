@@ -4,6 +4,7 @@ import { toast } from "react-toastify"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { EditPunchModal } from "./EditPunchModal"
+import { AtestadoModal } from "./AtestadoModal"
 
 const formatMillisToHours = (millis, allowNegative = false) => {
   if (isNaN(millis)) return "00:00"
@@ -56,6 +57,19 @@ const getExpectedWorkMillis = (dayOfWeek, schedule) => {
   return totalMillis - breakMillis
 }
 
+const getDatesInRange = (startDateStr, endDateStr) => {
+  const dates = [];
+  const start = new Date(startDateStr.replace(/-/g, '\/'));
+  const end = new Date(endDateStr.replace(/-/g, '\/'));
+  let currentDate = new Date(start);
+
+  while (currentDate <= end) {
+    dates.push(new Date(currentDate));
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  return dates;
+};
+
 export function ReportView({ user, onBack }) {
   const today = new Date().toISOString().split("T")[0]
   const [startDate, setStartDate] = useState(today)
@@ -68,6 +82,9 @@ export function ReportView({ user, onBack }) {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingPunch, setEditingPunch] = useState(null)
+
+  const [isAtestadoModalOpen, setIsAtestadoModalOpen] = useState(false);
+  const [selectedDateForAtestado, setSelectedDateForAtestado] = useState(null);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return
@@ -108,52 +125,71 @@ export function ReportView({ user, onBack }) {
       }
       const entries = await response.json()
 
-      const entriesByDay = entries.reduce((acc, entry) => {
-        const date = new Date(entry.timestamp).toLocaleDateString("pt-BR")
-        if (!acc[date]) {
-          acc[date] = { punches: [], totalWorkMillis: 0, totalBreakMillis: 0, dailyBalanceMillis: 0 }
+      const datesInRange = getDatesInRange(startDate, endDate);
+      const reportPeriod = {};
+
+      datesInRange.forEach(date => {
+        const dateKey = date.toLocaleDateString('pt-BR');
+        reportPeriod[dateKey] = {
+          punches: [], totalWorkMillis: 0, totalBreakMillis: 0, dailyBalanceMillis: 0,
+          isMedicalCertificate: false, justification: null, status: 'NO_RECORD'
+        };
+      });
+
+      entries.forEach(entry => {
+        const date = new Date(entry.timestamp);
+        const dateKey = date.toLocaleDateString('pt-BR');
+        if (reportPeriod[dateKey]) {
+          if (entry.isMedicalCertificate) {
+            reportPeriod[dateKey].isMedicalCertificate = true;
+            reportPeriod[dateKey].justification = entry.justification;
+            reportPeriod[dateKey].status = 'MEDICAL_CERTIFICATE';
+          } else {
+            reportPeriod[dateKey].punches.push({ ...entry, time: date });
+            reportPeriod[dateKey].status = 'HAS_PUNCHES';
+          }
         }
-        acc[date].punches.push({ ...entry, time: new Date(entry.timestamp) })
-        return acc
-      }, {})
+      });
 
-      let grandTotalWorkMillis = 0
-      let grandTotalBalanceMillis = 0
+      let grandTotalWorkMillis = 0;
+      let grandTotalBalanceMillis = 0;
 
-      for (const date in entriesByDay) {
-        let clockInTime = null,
-          breakStartTime = null
-        const dayOfWeek = entriesByDay[date].punches[0]?.time.getDay()
+      for (const dateKey in reportPeriod) {
+        const dayData = reportPeriod[dateKey];
+        if (dayData.status === 'HAS_PUNCHES') {
+          let clockInTime = null, breakStartTime = null;
+          const dayOfWeek = dayData.punches[0]?.time.getDay();
 
-        entriesByDay[date].punches.forEach((entry) => {
-          if (entry.status === "rejeitado") return
-          const entryTime = entry.time
-          if (entry.type === "Entrada") clockInTime = entryTime
-          if (entry.type === "Início do Intervalo") breakStartTime = entryTime
-          if (entry.type === "Fim do Intervalo" && breakStartTime) {
-            entriesByDay[date].totalBreakMillis += entryTime - breakStartTime
-            breakStartTime = null
-          }
-          if (entry.type === "Saída" && clockInTime) {
-            entriesByDay[date].totalWorkMillis += entryTime - clockInTime
-            clockInTime = null
-          }
-        })
+          dayData.punches.forEach((entry) => {
+            if (entry.status === "rejeitado") return;
+            const entryTime = entry.time;
+            if (entry.type === "Entrada") clockInTime = entryTime;
+            if (entry.type === "Início do Intervalo") breakStartTime = entryTime;
+            if (entry.type === "Fim do Intervalo" && breakStartTime) {
+              dayData.totalBreakMillis += entryTime - breakStartTime;
+              breakStartTime = null;
+            }
+            if (entry.type === "Saída" && clockInTime) {
+              dayData.totalWorkMillis += entryTime - clockInTime;
+              clockInTime = null;
+            }
+          });
 
-        entriesByDay[date].totalWorkMillis -= entriesByDay[date].totalBreakMillis
+          dayData.totalWorkMillis -= dayData.totalBreakMillis;
+          const expectedWorkMillis = getExpectedWorkMillis(dayOfWeek, employeeProfile.workHours);
+          dayData.dailyBalanceMillis = dayData.totalWorkMillis - expectedWorkMillis;
 
-        const expectedWorkMillis = getExpectedWorkMillis(dayOfWeek, employeeProfile.workHours)
-        entriesByDay[date].dailyBalanceMillis = entriesByDay[date].totalWorkMillis - expectedWorkMillis
-
-        grandTotalWorkMillis += entriesByDay[date].totalWorkMillis
-        grandTotalBalanceMillis += entriesByDay[date].dailyBalanceMillis
+          grandTotalWorkMillis += dayData.totalWorkMillis;
+          grandTotalBalanceMillis += dayData.dailyBalanceMillis;
+        }
       }
 
       setReportData({
-        groupedEntries: entriesByDay,
+        groupedEntries: reportPeriod,
         grandTotal: formatMillisToHours(grandTotalWorkMillis),
         grandTotalBalance: formatMillisToHours(grandTotalBalanceMillis, true),
       })
+
     } catch (err) {
       setError(err.message)
     } finally {
@@ -166,6 +202,43 @@ export function ReportView({ user, onBack }) {
       handleGenerateReport()
     }
   }, [employeeProfile, handleGenerateReport])
+
+  const handleOpenAtestadoModal = (date) => {
+    setSelectedDateForAtestado(date);
+    setIsAtestadoModalOpen(true);
+  };
+
+  const handleCloseAtestadoModal = () => {
+    setIsAtestadoModalOpen(false);
+    setSelectedDateForAtestado(null);
+  };
+
+  const handleSubmitAtestado = async (reason) => {
+    if (!selectedDateForAtestado || !user) return;
+    setIsLoading(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await fetch('/api/admin/medical-certificate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          userId: user.uid,
+          displayName: user.displayName,
+          date: selectedDateForAtestado,
+          reason
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      toast.success(data.success);
+      handleCloseAtestadoModal();
+      await handleGenerateReport();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleOpenEditPunchModal = (punch) => {
     setEditingPunch(punch)
@@ -255,25 +328,36 @@ export function ReportView({ user, onBack }) {
 
     const tableHeaders = [["Data", "Unidade", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
     const tableData = []
+    const bodyStyles = {}
 
-    for (const [date, data] of Object.entries(reportData.groupedEntries)) {
-      const entryTime = data.punches.find((p) => p.type === "Entrada")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const breakStartTime = data.punches.find((p) => p.type === "Início do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const breakEndTime = data.punches.find((p) => p.type === "Fim do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const exitTime = data.punches.find((p) => p.type === "Saída")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
-      const totalWork = formatMillisToHours(data.totalWorkMillis)
-      const dailyBalance = formatMillisToHours(data.dailyBalanceMillis, true)
+    const sortedDates = Object.entries(reportData.groupedEntries).sort(([dateA], [dateB]) => {
+      const [dayA, monthA, yearA] = dateA.split('/');
+      const [dayB, monthB, yearB] = dateB.split('/');
+      return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
+    });
 
-      const locations = new Set(data.punches.map(p => p.locationName).filter(Boolean));
-      let unitDisplay = "N/D";
-      if (locations.size === 1) {
-        unitDisplay = Array.from(locations)[0];
-      } else if (locations.size > 1) {
-        unitDisplay = "Múltiplas";
+    sortedDates.forEach(([date, data], index) => {
+      if (data.status === 'MEDICAL_CERTIFICATE') {
+        tableData.push([date, { content: `ATESTADO: ${data.justification}`, colSpan: 7, styles: { fontStyle: 'italic', textColor: [100, 100, 100] } }])
+      } else if (data.status === 'HAS_PUNCHES') {
+        const entryTime = data.punches.find((p) => p.type === "Entrada")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+        const breakStartTime = data.punches.find((p) => p.type === "Início do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+        const breakEndTime = data.punches.find((p) => p.type === "Fim do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+        const exitTime = data.punches.find((p) => p.type === "Saída")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
+        const totalWork = formatMillisToHours(data.totalWorkMillis)
+        const dailyBalance = formatMillisToHours(data.dailyBalanceMillis, true)
+
+        const locations = new Set(data.punches.map(p => p.locationName).filter(Boolean));
+        let unitDisplay = "N/D";
+        if (locations.size === 1) {
+          unitDisplay = Array.from(locations)[0];
+        } else if (locations.size > 1) {
+          unitDisplay = "Múltiplas";
+        }
+
+        tableData.push([date, unitDisplay, entryTime, breakStartTime, breakEndTime, exitTime, totalWork, dailyBalance])
       }
-
-      tableData.push([date, unitDisplay, entryTime, breakStartTime, breakEndTime, exitTime, totalWork, dailyBalance])
-    }
+    });
 
     autoTable(doc, {
       startY: 45,
@@ -479,6 +563,35 @@ export function ReportView({ user, onBack }) {
             <div className="space-y-4">
               {Object.keys(reportData.groupedEntries).length > 0 ? (
                 Object.entries(reportData.groupedEntries).map(([date, data]) => {
+                  if (data.status === 'NO_RECORD') {
+                    return (
+                      <div key={date} className="p-4 bg-white rounded-xl shadow border border-gray-200">
+                        <div className="flex justify-between items-center">
+                          <h3 className="text-lg font-semibold text-gray-700">Dia: {date}</h3>
+                          <button
+                            onClick={() => handleOpenAtestadoModal(date)}
+                            className="bg-blue-100 text-blue-800 text-xs font-bold py-1 px-3 rounded-full hover:bg-blue-200"
+                          >
+                            Lançar Atestado
+                          </button>
+                        </div>
+                        <p className="text-center text-gray-400 mt-2 text-sm">Nenhum registro de ponto.</p>
+                      </div>
+                    );
+                  }
+
+                  if (data.status === 'MEDICAL_CERTIFICATE') {
+                    return (
+                      <div key={date} className="p-4 bg-blue-50 rounded-xl shadow border border-blue-200">
+                        <h3 className="text-lg font-semibold text-blue-800">Dia: {date}</h3>
+                        <div className="mt-2 pl-2">
+                          <p className="font-semibold">Atestado Médico</p>
+                          <p className="text-sm text-gray-600 italic">Motivo: {data.justification}</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const dailyBalanceIsNegative = data.dailyBalanceMillis < 0
                   return (
                     <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
@@ -583,6 +696,12 @@ export function ReportView({ user, onBack }) {
         onClose={handleCloseEditPunchModal}
         entry={editingPunch}
         onSuccess={handleEditSuccess}
+      />
+      <AtestadoModal
+        isOpen={isAtestadoModalOpen}
+        onClose={handleCloseAtestadoModal}
+        onSubmit={handleSubmitAtestado}
+        selectedDate={selectedDateForAtestado}
       />
     </>
   )

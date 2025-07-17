@@ -401,4 +401,36 @@ app.post('/api/admin/users/:uid/resend-password', verifyFirebaseToken, verifyAdm
   }
 });
 
+app.post('/api/admin/medical-certificate', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { userId, date, reason, displayName } = req.body;
+    if (!userId || !date || !reason || !displayName) {
+      return res.status(400).json({ error: 'ID do usuário, data, nome e motivo são obrigatórios.' });
+    }
+
+    // A data virá no formato 'dd/MM/yyyy'. Converte para um objeto Date.
+    // Usamos o meio-dia para evitar problemas com fuso horário.
+    const [day, month, year] = date.split('/');
+    const certificateDate = new Date(`${year}-${month}-${day}T12:00:00.000-03:00`);
+
+    const medicalCertificateRecord = {
+      userId,
+      displayName,
+      timestamp: certificateDate,
+      type: 'Atestado',
+      justification: reason,
+      status: 'aprovado', // Atestados são aprovados automaticamente
+      isMedicalCertificate: true, // Flag para identificar o registro
+      createdAt: new Date(),
+    };
+
+    await db.collection('timeEntries').add(medicalCertificateRecord);
+    res.status(201).json({ success: 'Atestado médico lançado com sucesso!' });
+
+  } catch (error) {
+    console.error("Erro ao lançar atestado médico:", error);
+    res.status(500).json({ error: 'Erro interno ao lançar atestado.' });
+  }
+});
+
 exports.api = functions.https.onRequest(app);
