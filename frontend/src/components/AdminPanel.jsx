@@ -249,6 +249,32 @@ function ManageUsersView() {
 
 export function AdminPanel({ onBack }) {
   const [view, setView] = useState('menu');
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (view === 'menu') {
+      const fetchCount = async () => {
+        try {
+          const token = await auth.currentUser.getIdToken();
+          const response = await fetch('/api/admin/pending-entries', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setPendingCount(data.length);
+          } else {
+            console.error('Falha ao buscar contagem de pendências.');
+            setPendingCount(0);
+          }
+        } catch (error) {
+          console.error('Erro ao buscar contagem de pendências:', error);
+          setPendingCount(0);
+        }
+      };
+      
+      fetchCount();
+    }
+  }, [view]);
 
   const renderContent = () => {
     switch (view) {
@@ -263,10 +289,20 @@ export function AdminPanel({ onBack }) {
           <div className="space-y-6">
             <p className="text-center text-gray-600">Selecione uma das opções abaixo para continuar.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <button onClick={() => setView('approvals')} className="text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+
+              <button 
+                onClick={() => setView('approvals')} 
+                className="relative text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1"
+              >
+                {pendingCount > 0 && (
+                  <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
+                    {pendingCount}
+                  </span>
+                )}
                 <h3 className="text-lg font-semibold text-gray-800">Aprovações Pendentes</h3>
                 <p className="text-sm text-gray-500">Valide os registros de ponto atrasados.</p>
               </button>
+              
               <button onClick={() => setView('users')} className="text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
                 <h3 className="text-lg font-semibold text-gray-800">Gerenciar Funcionários</h3>
                 <p className="text-sm text-gray-500">Adicione, remova, edite e veja relatórios.</p>
