@@ -176,6 +176,11 @@ function App() {
   }, [timeHistory])
 
   const handleRegister = (entryType) => {
+    if (navigator.connection && navigator.connection.rtt > 300) {
+        toast.warn("Seu sinal de Wi-Fi parece fraco. Por favor, aproxime-se do roteador ou verifique sua conexão antes de registrar o ponto.");
+        return;
+    }
+    
     if (lastEntryTimestamp) {
       const now = new Date().getTime();
       const diff = now - lastEntryTimestamp;
