@@ -2,10 +2,28 @@ const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const webpush = require('web-push');
 const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineString } = require('firebase-functions/params');
 
 process.env.TZ = 'America/Fortaleza';
+
+const publicKey = defineString('WEBPUSH_PUBLIC_KEY');
+const privateKey = defineString('WEBPUSH_PRIVATE_KEY');
+
+function initializeWebPush() {
+    if (publicKey.value() && privateKey.value()) {
+        webpush.setVapidDetails(
+            'mailto:ranieryfialho@gmail.com',
+            publicKey.value(),
+            privateKey.value()
+        );
+    } else {
+        console.warn('VAPID keys not configured. Push notifications will not work.');
+    }
+}
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -39,6 +57,52 @@ const verifyAdmin = async (req, res, next) => {
   }
 };
 
+app.post('/api/save-subscription', verifyFirebaseToken, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    const userId = req.user.uid;
+
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ error: 'Objeto de inscrição inválido.' });
+    }
+
+    const employeeRef = db.collection('employees').doc(userId);
+    
+    await employeeRef.set({
+      pushSubscriptions: admin.firestore.FieldValue.arrayUnion(subscription)
+    }, { merge: true });
+
+    res.status(200).json({ success: 'Inscrição para notificações salva com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao salvar inscrição de notificação:", error);
+    res.status(500).json({ error: 'Erro interno ao salvar inscrição.' });
+  }
+});
+
+// NOVO: Endpoint para remover a inscrição de notificação
+app.post('/api/remove-subscription', verifyFirebaseToken, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    const userId = req.user.uid;
+
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ error: 'Objeto de inscrição inválido.' });
+    }
+
+    const employeeRef = db.collection('employees').doc(userId);
+
+    await employeeRef.update({
+      pushSubscriptions: admin.firestore.FieldValue.arrayRemove(subscription)
+    });
+
+    res.status(200).json({ success: 'Inscrição de notificação removida com sucesso!' });
+  } catch (error) {
+    console.error("Erro ao remover inscrição de notificação:", error);
+    res.status(500).json({ error: 'Erro interno ao remover inscrição.' });
+  }
+});
+
+
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -58,7 +122,6 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     const allowedLocationType = employeeProfile.allowedLocation || 'matriz';
 
-    // A checagem de 10 minutos só se aplica para registros "ao vivo"
     if (!timestamp) {
       const lastEntryQuery = await db.collection('timeEntries').where('userId', '==', userId).orderBy('timestamp', 'desc').limit(1).get();
       if (!lastEntryQuery.empty) {
@@ -139,20 +202,17 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
             const latenessMinutes = Math.floor((now.getTime() - scheduledTimeToday.getTime()) / 60000);
             
             if (latenessMinutes > 120) {
-                // *** INÍCIO DA CORREÇÃO ***
-                if (timestamp) { // Se for um registro offline (tem timestamp do passado)
+                if (timestamp) {
                     entryStatus = 'pendente_aprovacao';
-                    // Se o registro offline já tiver uma justificativa, use-a. Senão, adicione uma padrão.
                     finalJustification = justification || 'Registro offline com atraso. Requer validação do gestor.';
                     successMessage = 'Registro offline sincronizado, mas aguardando aprovação.';
-                } else { // Se for um registro online, em tempo real, o comportamento antigo se mantém
+                } else { 
                     if (!justification) {
                         return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
                     }
                     entryStatus = 'pendente_aprovacao';
                     successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
                 }
-                // *** FIM DA CORREÇÃO ***
             }
         }
     }
@@ -177,6 +237,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   }
 });
 
+// ... (todas as outras rotas da API continuam aqui)
 app.get('/api/admin/company', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const adminId = req.user.uid;
@@ -458,4 +519,83 @@ app.post('/api/admin/medical-certificate', verifyFirebaseToken, verifyAdmin, asy
   }
 });
 
+
 exports.api = functions.https.onRequest(app);
+
+
+exports.sendPunchReminders = onSchedule({
+    schedule: "every 5 minutes",
+    timeZone: "America/Fortaleza",
+    retryConfig: {
+      retryCount: 3,
+      minBackoffSeconds: 60,
+    }
+  }, async (event) => {
+  
+  initializeWebPush();
+
+  const now = new Date();
+  const currentTime = now.getHours() * 60 + now.getMinutes(); 
+
+  const employeesSnapshot = await db.collection('employees').where('status', '==', 'ativo').get();
+  if (employeesSnapshot.empty) {
+    console.log("Nenhum funcionário ativo encontrado.");
+    return null;
+  }
+
+  const dayMap = { 0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday', 4: 'thursday', 5: 'friday', 6: 'saturday' };
+  const todayKey = dayMap[now.getDay()];
+
+  for (const doc of employeesSnapshot.docs) {
+    const employee = doc.data();
+    const employeeId = doc.id;
+
+    if (!employee.workHours || !employee.workHours[todayKey] || !employee.workHours[todayKey].isWorkDay || !employee.pushSubscriptions || employee.pushSubscriptions.length === 0) {
+      continue;
+    }
+
+    const schedule = employee.workHours[todayKey];
+    
+    const lastEntryQuery = await db.collection('timeEntries').where('userId', '==', employeeId).orderBy('timestamp', 'desc').limit(1).get();
+    const lastEntry = lastEntryQuery.empty ? null : lastEntryQuery.docs[0].data();
+    const lastEntryType = lastEntry ? lastEntry.type : 'Saída'; 
+    
+    let notificationPayload = null;
+    const timeSlots = [
+        { type: 'Entrada', time: schedule.entry, expectedLast: 'Saída' },
+        { type: 'Início do Intervalo', time: schedule.breakStart, expectedLast: 'Entrada' },
+        { type: 'Fim do Intervalo', time: schedule.breakEnd, expectedLast: 'Início do Intervalo' },
+        { type: 'Saída', time: schedule.exit, expectedLast: 'Fim do Intervalo' }
+    ];
+
+    for (const slot of timeSlots) {
+        if (!slot.time) continue;
+        const [hours, minutes] = slot.time.split(':').map(Number);
+        const slotTime = hours * 60 + minutes;
+
+        if (currentTime >= (slotTime - 5) && currentTime < slotTime && lastEntryType === slot.expectedLast) {
+            notificationPayload = {
+                title: 'Lembrete de Ponto',
+                body: `Está quase na hora de registrar sua '${slot.type}'. Não se esqueça!`,
+                url: `https://${process.env.GCLOUD_PROJECT}.web.app/`
+            };
+            break; 
+        }
+    }
+
+    if (notificationPayload) {
+      console.log(`Enviando notificação de '${notificationPayload.body}' para ${employee.displayName}`);
+      
+      const sendPromises = employee.pushSubscriptions.map(sub => 
+        webpush.sendNotification(sub, JSON.stringify(notificationPayload))
+          .catch(err => {
+            console.error(`Erro ao enviar para ${sub.endpoint.substring(0, 20)}...:`, err.statusCode);
+          })
+      );
+
+      await Promise.allSettled(sendPromises);
+    }
+  }
+
+  return null;
+});
