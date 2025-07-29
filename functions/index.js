@@ -1,7 +1,7 @@
 const functions = require('firebase-functions');
 const express = require('express');
 const cors = require('cors');
-const axios =require('axios');
+const axios = require('axios');
 const { db, admin } = require('./firebase-config.js');
 const { getDistanceInMeters } = require('./haversine.js');
 
@@ -27,16 +27,16 @@ const verifyFirebaseToken = async (req, res, next) => {
 };
 
 const verifyAdmin = async (req, res, next) => {
-    try {
-        const user = await admin.auth().getUser(req.user.uid);
-        if (user.customClaims && user.customClaims.admin === true) {
-            req.user.admin = true;
-            return next();
-        }
-        return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
-    } catch (error) {
-        return res.status(500).json({ error: 'Erro ao verificar permissões.' });
+  try {
+    const user = await admin.auth().getUser(req.user.uid);
+    if (user.customClaims && user.customClaims.admin === true) {
+      req.user.admin = true;
+      return next();
     }
+    return res.status(403).json({ error: 'Acesso negado. Requer privilégios de administrador.' });
+  } catch (error) {
+    return res.status(500).json({ error: 'Erro ao verificar permissões.' });
+  }
 };
 
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
@@ -80,7 +80,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       }
       const companyData = companyDoc.data();
       const allCompanyAddresses = companyData.addresses || [];
-      
+
       let addressesToCheck = [];
 
       if (allowedLocationType === 'matriz') {
@@ -94,7 +94,7 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       if (addressesToCheck.length === 0) {
         return res.status(400).json({ error: `Sua permissão (${allowedLocationType}) não corresponde a nenhum local cadastrado para a empresa.` });
       }
-      
+
       let closestDistance = Infinity;
 
       for (const address of addressesToCheck) {
@@ -124,16 +124,25 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
       if (employeeProfile.workHours) {
         const schedule = employeeProfile.workHours;
         const dayOfWeek = now.getDay();
-        let scheduledTimeString = null;
-        if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) { scheduledTimeString = schedule.saturday.entry; }
-        else if (dayOfWeek >= 1 && dayOfWeek <= 5) { scheduledTimeString = schedule.weekday?.entry; }
-        if (scheduledTimeString) {
-          const [hours, minutes] = scheduledTimeString.split(':').map(Number);
+
+        const dayMap = {
+          0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday',
+          4: 'thursday', 5: 'friday', 6: 'saturday',
+        };
+        const dayKey = dayMap[dayOfWeek];
+        const daySchedule = schedule[dayKey];
+
+        if (daySchedule && daySchedule.isWorkDay && daySchedule.entry) {
+          const [hours, minutes] = daySchedule.entry.split(':').map(Number);
           const scheduledTimeToday = new Date();
           scheduledTimeToday.setHours(hours, minutes, 0, 0);
+
           const latenessMinutes = Math.floor((now.getTime() - scheduledTimeToday.getTime()) / 60000);
+
           if (latenessMinutes > 120) {
-            if (!justification) { return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true }); }
+            if (!justification) {
+              return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+            }
             entryStatus = 'pendente_aprovacao';
             successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
           }
@@ -199,7 +208,7 @@ app.post('/api/admin/company', verifyFirebaseToken, verifyAdmin, async (req, res
       companyId = newCompanyRef.id;
       await adminDocRef.set({ companyId }, { merge: true });
     }
-    res.status(200).json({ success: 'Perfil da empresa salvo com sucesso!', companyProfile: {id: companyId, ...companyProfileData} });
+    res.status(200).json({ success: 'Perfil da empresa salvo com sucesso!', companyProfile: { id: companyId, ...companyProfileData } });
   } catch (error) {
     console.error('Erro ao salvar perfil da empresa:', error);
     res.status(500).json({ error: 'Erro interno ao salvar perfil da empresa. ' + error.message });
@@ -228,14 +237,14 @@ app.post('/api/admin/create-user', verifyFirebaseToken, verifyAdmin, async (req,
   try {
     const { email, displayName } = req.body;
     if (!email || !displayName) { return res.status(400).json({ error: 'E-mail e Nome são obrigatórios.' }); }
-    
+
     const adminDoc = await db.collection('employees').doc(req.user.uid).get();
     const companyId = adminDoc.exists ? adminDoc.data().companyId : null;
     if (!companyId) {
       return res.status(400).json({ error: 'O administrador não está vinculado a uma empresa. Por favor, cadastre o perfil da empresa primeiro.' });
     }
     const userRecord = await admin.auth().createUser({ email, displayName });
-    
+
     const newEmployeeProfile = {
       displayName, email, companyId, status: 'ativo', allowedLocation: 'matriz',
       workHours: {
@@ -286,9 +295,9 @@ app.put('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req, r
     const { email, displayName, cpf, cargo, workHours, allowedLocation, status } = req.body;
     if (!email || !displayName) { return res.status(400).json({ error: 'E-mail e Nome são obrigatórios.' }); }
     await admin.auth().updateUser(uid, { email: email, displayName: displayName, });
-    const employeeProfile = { 
-        displayName, email, cpf: cpf || null, cargo: cargo || null, workHours: workHours || null,
-        allowedLocation: allowedLocation || 'matriz', status: status || 'ativo'
+    const employeeProfile = {
+      displayName, email, cpf: cpf || null, cargo: cargo || null, workHours: workHours || null,
+      allowedLocation: allowedLocation || 'matriz', status: status || 'ativo'
     };
     await db.collection('employees').doc(uid).set(employeeProfile, { merge: true });
     res.status(200).json({ success: 'Usuário atualizado com sucesso!' });
@@ -408,8 +417,6 @@ app.post('/api/admin/medical-certificate', verifyFirebaseToken, verifyAdmin, asy
       return res.status(400).json({ error: 'ID do usuário, data, nome e motivo são obrigatórios.' });
     }
 
-    // A data virá no formato 'dd/MM/yyyy'. Converte para um objeto Date.
-    // Usamos o meio-dia para evitar problemas com fuso horário.
     const [day, month, year] = date.split('/');
     const certificateDate = new Date(`${year}-${month}-${day}T12:00:00.000-03:00`);
 
@@ -419,8 +426,8 @@ app.post('/api/admin/medical-certificate', verifyFirebaseToken, verifyAdmin, asy
       timestamp: certificateDate,
       type: 'Atestado',
       justification: reason,
-      status: 'aprovado', // Atestados são aprovados automaticamente
-      isMedicalCertificate: true, // Flag para identificar o registro
+      status: 'aprovado',
+      isMedicalCertificate: true,
       createdAt: new Date(),
     };
 

@@ -24,38 +24,65 @@ const formatMillisToHours = (millis, allowNegative = false) => {
 }
 
 const getExpectedWorkMillis = (dayOfWeek, schedule) => {
-  if (!schedule) return 0
+  if (!schedule) return 0;
 
-  let daySchedule
-  if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-    daySchedule = schedule.saturday
-  } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-    daySchedule = schedule.weekday
-  } else {
-    return 0
+  // Mapa de getDay() para as chaves do nosso objeto de horário
+  const dayMap = {
+    0: 'sunday',
+    1: 'monday',
+    2: 'tuesday',
+    3: 'wednesday',
+    4: 'thursday',
+    5: 'friday',
+    6: 'saturday',
+  };
+
+  const dayKey = dayMap[dayOfWeek];
+  const daySchedule = schedule[dayKey];
+
+  // Verifica se é um dia de trabalho e se possui os horários definidos
+  if (!daySchedule || !daySchedule.isWorkDay || !daySchedule.entry || !daySchedule.exit) {
+    // Tenta usar o formato antigo como fallback para compatibilidade
+    if (dayOfWeek >= 1 && dayOfWeek <= 5 && schedule.weekday?.entry && schedule.weekday?.exit) {
+      const { entry, exit, breakStart, breakEnd } = schedule.weekday;
+      const [entryH, entryM] = entry.split(":").map(Number);
+      const [exitH, exitM] = exit.split(":").map(Number);
+      const [breakStartH, breakStartM] = (breakStart || "00:00").split(":").map(Number);
+      const [breakEndH, breakEndM] = (breakEnd || "00:00").split(":").map(Number);
+      const entryDate = new Date(0);
+      entryDate.setHours(entryH, entryM);
+      const exitDate = new Date(0);
+      exitDate.setHours(exitH, exitM);
+      const breakStartDate = new Date(0);
+      breakStartDate.setHours(breakStartH, breakStartM);
+      const breakEndDate = new Date(0);
+      breakEndDate.setHours(breakEndH, breakEndM);
+      const totalMillis = exitDate - entryDate;
+      const breakMillis = breakEndDate - breakStartDate;
+      return totalMillis - breakMillis;
+    }
+    return 0;
   }
 
-  if (!daySchedule || !daySchedule.entry || !daySchedule.exit) return 0
+  const [entryH, entryM] = daySchedule.entry.split(":").map(Number);
+  const [exitH, exitM] = daySchedule.exit.split(":").map(Number);
+  const [breakStartH, breakStartM] = (daySchedule.breakStart || "00:00").split(":").map(Number);
+  const [breakEndH, breakEndM] = (daySchedule.breakEnd || "00:00").split(":").map(Number);
 
-  const [entryH, entryM] = daySchedule.entry.split(":").map(Number)
-  const [exitH, exitM] = daySchedule.exit.split(":").map(Number)
-  const [breakStartH, breakStartM] = (daySchedule.breakStart || "00:00").split(":").map(Number)
-  const [breakEndH, breakEndM] = (daySchedule.breakEnd || "00:00").split(":").map(Number)
+  const entryDate = new Date(0);
+  entryDate.setHours(entryH, entryM);
+  const exitDate = new Date(0);
+  exitDate.setHours(exitH, exitM);
+  const breakStartDate = new Date(0);
+  breakStartDate.setHours(breakStartH, breakStartM);
+  const breakEndDate = new Date(0);
+  breakEndDate.setHours(breakEndH, breakEndM);
 
-  const entryDate = new Date(0)
-  entryDate.setHours(entryH, entryM)
-  const exitDate = new Date(0)
-  exitDate.setHours(exitH, exitM)
-  const breakStartDate = new Date(0)
-  breakStartDate.setHours(breakStartH, breakStartM)
-  const breakEndDate = new Date(0)
-  breakEndDate.setHours(breakEndH, breakEndM)
+  const totalMillis = exitDate - entryDate;
+  const breakMillis = breakEndDate - breakStartDate;
 
-  const totalMillis = exitDate - entryDate
-  const breakMillis = breakEndDate - breakStartDate
-
-  return totalMillis - breakMillis
-}
+  return totalMillis - breakMillis;
+};
 
 const getDatesInRange = (startDateStr, endDateStr) => {
   const dates = [];
@@ -394,17 +421,29 @@ export function ReportView({ user, onBack }) {
 
   const getPunchStatusColor = (punchType, punchTime) => {
     if (!employeeProfile?.workHours) return "text-gray-600"
-    const schedule = employeeProfile.workHours
-    const dayOfWeek = punchTime.getDay()
-    let daySchedule
-    if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-      daySchedule = schedule.saturday
-    } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      daySchedule = schedule.weekday
-    } else {
-      return "text-gray-600"
+    const schedule = employeeProfile.workHours;
+    const dayOfWeek = punchTime.getDay();
+
+    const dayMap = {
+      0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday',
+      4: 'thursday', 5: 'friday', 6: 'saturday',
+    };
+    const dayKey = dayMap[dayOfWeek];
+    let daySchedule = schedule[dayKey];
+
+    // Fallback para o formato antigo
+    if (!daySchedule) {
+      if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+        daySchedule = schedule.saturday;
+      } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        daySchedule = schedule.weekday;
+      } else {
+        return "text-gray-600";
+      }
     }
-    if (!daySchedule) return "text-gray-600"
+
+    if (!daySchedule || !daySchedule.isWorkDay) return "text-gray-600";
+
     const scheduleMap = {
       Entrada: daySchedule.entry,
       "Início do Intervalo": daySchedule.breakStart,
