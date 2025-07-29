@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react" // Adicionado useCallback
 import { auth, db } from "./firebase-config"
 import { onAuthStateChanged, signOut } from "firebase/auth"
-import { collection, query, where, orderBy, onSnapshot, limit } from "firebase/firestore"
+import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore"
 import { Auth } from "./components/Auth"
 import { AdminPanel } from "./components/AdminPanel"
 import { ToastContainer, toast } from "react-toastify"
@@ -25,6 +25,26 @@ const ENTRY_TYPES = {
 
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 
+// Funções para gerenciar a fila de registros offline
+const getOfflineQueue = () => {
+  try {
+    const queue = localStorage.getItem('offlineQueue');
+    return queue ? JSON.parse(queue) : [];
+  } catch (error) {
+    console.error("Erro ao ler a fila offline:", error);
+    return [];
+  }
+};
+
+const saveOfflineQueue = (queue) => {
+  try {
+    localStorage.setItem('offlineQueue', JSON.stringify(queue));
+  } catch (error) {
+    console.error("Erro ao salvar a fila offline:", error);
+  }
+};
+// Fim das funções da fila
+
 function App() {
   const [user, setUser] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -39,6 +59,105 @@ function App() {
   const [profileLoading, setProfileLoading] = useState(false)
   const [lastEntryTimestamp, setLastEntryTimestamp] = useState(null);
   const [timeToWait, setTimeToWait] = useState(0);
+
+  // Estado para a fila de registros pendentes
+  const [offlineQueue, setOfflineQueue] = useState(getOfflineQueue());
+  // NOVO: Estado para controlar se a sincronização está em andamento
+  const [isSyncing, setIsSyncing] = useState(false);
+
+
+  const sendDataToServer = useCallback(async (location, type, justification = null, isOfflineSync = false, offlinePunch = null) => {
+    // Para evitar múltiplas submissões enquanto uma já está em andamento
+    if (!isOfflineSync) setIsLoading(true);
+
+    const punchData = offlinePunch || {
+      id: `offline-${Date.now()}`,
+      type,
+      location,
+      justification,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      // Se não for uma sincronização, checa se está online antes de tentar.
+      if (!navigator.onLine && !isOfflineSync) {
+        throw new Error("Offline. O registro será salvo localmente.");
+      }
+
+      const token = await user.getIdToken();
+      const response = await fetch("/api/clock-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(punchData),
+      });
+
+      const data = await response.json();
+
+      if (response.status === 422 && data.requiresJustification) {
+        setLateEntryLocation(location);
+        setIsJustificationModalOpen(true);
+        return { success: false, needsJustification: true }; 
+      }
+
+      if (!response.ok) throw new Error(data.error || "Ocorreu um erro desconhecido.");
+
+      if (!isOfflineSync) {
+        toast.success(data.success);
+        setMessage(`✅ ${data.success}`);
+      }
+      
+      return { success: true, punchId: punchData.id };
+
+    } catch (error) {
+      if (!isOfflineSync) {
+        const newQueue = [...getOfflineQueue(), punchData];
+        saveOfflineQueue(newQueue);
+        setOfflineQueue(newQueue);
+        toast.warn(`Você está offline. Seu registro de ${type} foi salvo e será enviado assim que a conexão voltar.`);
+        setMessage(`🕒 Registro de ${type} salvo localmente.`);
+      } else {
+        console.error(`Falha ao sincronizar o registro ${punchData.id}:`, error.message);
+      }
+      return { success: false, punchId: punchData.id };
+    } finally {
+      if (!isJustificationModalOpen && !isOfflineSync) {
+        setIsLoading(false);
+      }
+    }
+  }, [user, isJustificationModalOpen]); // Adiciona dependências ao useCallback
+
+  // NOVO: Função para sincronizar a fila
+  const syncOfflineQueue = useCallback(async () => {
+    if (isSyncing || !navigator.onLine || !user) return; // Não sincroniza se já estiver sincronizando, offline ou deslogado
+
+    let queue = getOfflineQueue();
+    if (queue.length === 0) return;
+
+    setIsSyncing(true);
+    toast.info(`Sincronizando ${queue.length} registro(s) pendente(s)...`);
+
+    for (const punch of queue) {
+      const result = await sendDataToServer(punch.location, punch.type, punch.justification, true, punch);
+      
+      if (result.success) {
+        // Se sucesso, remove o item da fila
+        let currentQueue = getOfflineQueue();
+        let updatedQueue = currentQueue.filter(p => p.id !== punch.id);
+        saveOfflineQueue(updatedQueue);
+        setOfflineQueue(updatedQueue); // Atualiza o estado
+      }
+    }
+
+    const finalQueue = getOfflineQueue();
+    if (finalQueue.length === 0) {
+      toast.success("Todos os registros foram sincronizados com sucesso!");
+    } else {
+      toast.warn(`${finalQueue.length} registro(s) não puderam ser sincronizados. Tentaremos novamente mais tarde.`);
+    }
+
+    setIsSyncing(false);
+  }, [user, isSyncing, sendDataToServer]);
+
 
   useEffect(() => {
     if (timeToWait > 0) {
@@ -56,13 +175,31 @@ function App() {
       if (currentUser) {
         const tokenResult = await currentUser.getIdTokenResult()
         setIsAdmin(tokenResult.claims.admin === true)
+        // NOVO: Tenta sincronizar ao carregar a página se estiver online
+        if (navigator.onLine) {
+            syncOfflineQueue();
+        }
       } else {
         setIsAdmin(false)
         setEmployeeProfile(null)
       }
     })
     return () => unsubscribe()
-  }, [])
+  }, [syncOfflineQueue]) // Adiciona syncOfflineQueue às dependências
+
+  // NOVO: Listeners de status da conexão
+  useEffect(() => {
+    const goOnline = () => syncOfflineQueue();
+    const goOffline = () => toast.warn("Conexão perdida. Os registros serão salvos localmente.");
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    return () => {
+        window.removeEventListener('online', goOnline);
+        window.removeEventListener('offline', goOffline);
+    };
+  }, [syncOfflineQueue]); // Adiciona syncOfflineQueue às dependências
 
   useEffect(() => {
     if (!user) {
@@ -142,12 +279,12 @@ function App() {
         }
         
         setUserStatus(newStatus);
-        setMessage(newMessage); // Atualiza a mensagem com o status real
+        setMessage(newMessage);
       },
       (error) => {
         console.error("Erro ao buscar histórico de ponto:", error);
         toast.error("Não foi possível carregar seu histórico de ponto.");
-        setUserStatus(STATUS.CLOCKED_OUT); // Define um estado seguro em caso de erro
+        setUserStatus(STATUS.CLOCKED_OUT);
         setMessage("❌ Erro ao buscar histórico.");
       },
     );
@@ -200,38 +337,11 @@ function App() {
         sendDataToServer({ lat: latitude, lon: longitude }, entryType)
       },
       (error) => {
-        toast.error("É necessário permitir o acesso à localização.")
-        setIsLoading(false)
+        toast.warn("Não foi possível obter a localização. O registro será salvo para envio posterior.");
+        sendDataToServer({ lat: null, lon: null }, entryType);
       },
+      { timeout: 8000, enableHighAccuracy: true }
     )
-  }
-
-  const sendDataToServer = async (location, type, justification = null) => {
-    setIsLoading(true)
-    try {
-      const token = await user.getIdToken()
-      const response = await fetch("/api/clock-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ location, type, justification }),
-      })
-      const data = await response.json()
-      if (response.status === 422 && data.requiresJustification) {
-        setLateEntryLocation(location)
-        setIsJustificationModalOpen(true)
-        return
-      }
-      if (!response.ok) throw new Error(data.error || "Ocorreu um erro desconhecido.")
-      toast.success(data.success)
-      setMessage(`✅ ${data.success}`)
-    } catch (error) {
-      toast.error(error.message)
-      setMessage(`❌ Erro: ${error.message}`)
-    } finally {
-      if (!isJustificationModalOpen) {
-        setIsLoading(false)
-      }
-    }
   }
 
   const handleSubmitJustification = async (justification) => {
@@ -253,10 +363,10 @@ function App() {
         </button>
       );
     }
-    if (isLoading) {
+    if (isLoading || isSyncing) { // NOVO: Desabilita botões durante a sincronização
       return (
         <button disabled className="w-full bg-gray-400 text-white font-bold py-3 px-6 rounded-lg">
-          Aguarde...
+          {isSyncing ? 'Sincronizando...' : 'Aguarde...'}
         </button>
       )
     }
@@ -316,6 +426,15 @@ function App() {
           <p className="mb-4 capitalize text-xl text-center font-bold text-gray-800">
             Bem-vindo, {user.displayName || user.email}! 👋
           </p>
+
+          {/* Indicador de Fila Offline */}
+          {offlineQueue.length > 0 && (
+            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-center animate-pulse">
+                <p className="text-sm font-semibold text-orange-700">
+                  {offlineQueue.length} {offlineQueue.length === 1 ? 'registro pendente' : 'registros pendentes'} de sincronização.
+                </p>
+            </div>
+          )}
 
           {isAdmin && (
             <button

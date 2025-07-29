@@ -42,9 +42,9 @@ const verifyAdmin = async (req, res, next) => {
 app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { location, type, justification } = req.body;
+    const { location, type, justification, timestamp } = req.body;
     const requestIp = req.ip;
-    const now = new Date();
+    const now = timestamp ? new Date(timestamp) : new Date();
 
     const employeeDoc = await db.collection('employees').doc(userId).get();
     if (!employeeDoc.exists || !employeeDoc.data().companyId) {
@@ -58,21 +58,24 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     const allowedLocationType = employeeProfile.allowedLocation || 'matriz';
 
-    const lastEntryQuery = await db.collection('timeEntries').where('userId', '==', userId).orderBy('timestamp', 'desc').limit(1).get();
-    if (!lastEntryQuery.empty) {
-      const lastTimestamp = lastEntryQuery.docs[0].data().timestamp.toDate().getTime();
-      const diff = now.getTime() - lastTimestamp;
-      if (diff < TEN_MINUTES_IN_MS) {
-        return res.status(429).json({ error: `Aguarde mais ${Math.ceil((TEN_MINUTES_IN_MS - diff) / 1000)} segundos para registrar novamente.` });
+    // A checagem de 10 minutos só se aplica para registros "ao vivo"
+    if (!timestamp) {
+      const lastEntryQuery = await db.collection('timeEntries').where('userId', '==', userId).orderBy('timestamp', 'desc').limit(1).get();
+      if (!lastEntryQuery.empty) {
+        const lastTimestamp = lastEntryQuery.docs[0].data().timestamp.toDate().getTime();
+        const diff = now.getTime() - lastTimestamp;
+        if (diff < TEN_MINUTES_IN_MS) {
+          return res.status(429).json({ error: `Aguarde mais ${Math.ceil((TEN_MINUTES_IN_MS - diff) / 1000)} segundos para registrar novamente.` });
+        }
       }
     }
 
     let isValidLocation = false;
     let locationName = null;
 
-    if (allowedLocationType === 'externo') {
-      isValidLocation = true;
-      locationName = 'Externo';
+    if (allowedLocationType === 'externo' || !location || !location.lat) {
+        isValidLocation = true;
+        locationName = allowedLocationType === 'externo' ? 'Externo' : 'Localização Indisponível';
     } else {
       const companyDoc = await db.collection('companies').doc(employeeProfile.companyId).get();
       if (!companyDoc.exists) {
@@ -119,38 +122,53 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
 
     let entryStatus = 'aprovado';
     let successMessage = `Registro de '${type}' realizado com sucesso em "${locationName}"!`;
+    let finalJustification = justification || null;
 
-    if (type === 'Entrada') {
-      if (employeeProfile.workHours) {
+    if (type === 'Entrada' && employeeProfile.workHours) {
         const schedule = employeeProfile.workHours;
         const dayOfWeek = now.getDay();
-
-        const dayMap = {
-          0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday',
-          4: 'thursday', 5: 'friday', 6: 'saturday',
-        };
+        const dayMap = { 0: 'sunday', 1: 'monday', 2: 'tuesday', 3: 'wednesday', 4: 'thursday', 5: 'friday', 6: 'saturday' };
         const dayKey = dayMap[dayOfWeek];
         const daySchedule = schedule[dayKey];
 
         if (daySchedule && daySchedule.isWorkDay && daySchedule.entry) {
-          const [hours, minutes] = daySchedule.entry.split(':').map(Number);
-          const scheduledTimeToday = new Date();
-          scheduledTimeToday.setHours(hours, minutes, 0, 0);
-
-          const latenessMinutes = Math.floor((now.getTime() - scheduledTimeToday.getTime()) / 60000);
-
-          if (latenessMinutes > 120) {
-            if (!justification) {
-              return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+            const [hours, minutes] = daySchedule.entry.split(':').map(Number);
+            const scheduledTimeToday = new Date(now);
+            scheduledTimeToday.setHours(hours, minutes, 0, 0);
+            
+            const latenessMinutes = Math.floor((now.getTime() - scheduledTimeToday.getTime()) / 60000);
+            
+            if (latenessMinutes > 120) {
+                // *** INÍCIO DA CORREÇÃO ***
+                if (timestamp) { // Se for um registro offline (tem timestamp do passado)
+                    entryStatus = 'pendente_aprovacao';
+                    // Se o registro offline já tiver uma justificativa, use-a. Senão, adicione uma padrão.
+                    finalJustification = justification || 'Registro offline com atraso. Requer validação do gestor.';
+                    successMessage = 'Registro offline sincronizado, mas aguardando aprovação.';
+                } else { // Se for um registro online, em tempo real, o comportamento antigo se mantém
+                    if (!justification) {
+                        return res.status(422).json({ error: 'Justificativa necessária.', requiresJustification: true });
+                    }
+                    entryStatus = 'pendente_aprovacao';
+                    successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
+                }
+                // *** FIM DA CORREÇÃO ***
             }
-            entryStatus = 'pendente_aprovacao';
-            successMessage = 'Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.';
-          }
         }
-      }
     }
 
-    const timeRecord = { userId, displayName: req.user.name || employeeProfile.displayName || req.user.email, timestamp: now, location, locationName, type, validatedIp: requestIp, status: entryStatus, justification: justification || null, };
+    const timeRecord = { 
+        userId, 
+        displayName: req.user.name || employeeProfile.displayName || req.user.email, 
+        timestamp: now, 
+        location, 
+        locationName, 
+        type, 
+        validatedIp: requestIp, 
+        status: entryStatus, 
+        justification: finalJustification,
+        isOffline: !!timestamp 
+    };
     await db.collection('timeEntries').add(timeRecord);
     res.status(201).json({ success: successMessage });
   } catch (error) {
