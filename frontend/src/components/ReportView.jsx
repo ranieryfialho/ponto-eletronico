@@ -607,11 +607,16 @@ export function ReportView({ user, onBack }) {
             <div className="space-y-4">
               {Object.keys(reportData.groupedEntries).length > 0 ? (
                 Object.entries(reportData.groupedEntries).map(([date, data]) => {
+                  const [day, month, year] = date.split('/');
+                  const dateObj = new Date(year, parseInt(month, 10) - 1, parseInt(day, 10));
+                  const dayOfWeek = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
+                  const formattedDayOfWeek = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+
                   if (data.status === 'NO_RECORD') {
                     return (
                       <div key={date} className="p-4 bg-white rounded-xl shadow border border-gray-200">
                         <div className="flex justify-between items-center">
-                          <h3 className="text-lg font-semibold text-gray-700">Dia: {date}</h3>
+                          <h3 className="text-lg font-semibold text-gray-700">Dia: {date} ({formattedDayOfWeek})</h3>
                           <button
                             onClick={() => handleOpenAtestadoModal(date)}
                             className="bg-blue-100 text-blue-800 text-xs font-bold py-1 px-3 rounded-full hover:bg-blue-200"
@@ -627,7 +632,7 @@ export function ReportView({ user, onBack }) {
                   if (data.status === 'MEDICAL_CERTIFICATE') {
                     return (
                       <div key={date} className="p-4 bg-blue-50 rounded-xl shadow border border-blue-200">
-                        <h3 className="text-lg font-semibold text-blue-800">Dia: {date}</h3>
+                        <h3 className="text-lg font-semibold text-blue-800">Dia: {date} ({formattedDayOfWeek})</h3>
                         <div className="mt-2 pl-2">
                           <p className="font-semibold">Atestado Médico</p>
                           <p className="text-sm text-gray-600 italic">Motivo: {data.justification}</p>
@@ -639,7 +644,7 @@ export function ReportView({ user, onBack }) {
                   const dailyBalanceIsNegative = data.dailyBalanceMillis < 0
                   return (
                     <div key={date} className="p-6 bg-white rounded-xl shadow-md border border-gray-200">
-                      <h3 className="text-lg font-semibold mb-4">Dia: {date}</h3>
+                      <h3 className="text-lg font-semibold mb-4">Dia: {date} ({formattedDayOfWeek})</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
                         <div className="bg-green-100 p-4 rounded-lg text-center">
                           <p className="text-sm font-medium text-green-800">Total Trabalhado</p>
