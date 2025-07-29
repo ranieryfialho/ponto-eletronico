@@ -26,7 +26,6 @@ const formatMillisToHours = (millis, allowNegative = false) => {
 const getExpectedWorkMillis = (dayOfWeek, schedule) => {
   if (!schedule) return 0;
 
-  // Mapa de getDay() para as chaves do nosso objeto de horário
   const dayMap = {
     0: 'sunday',
     1: 'monday',
@@ -40,9 +39,7 @@ const getExpectedWorkMillis = (dayOfWeek, schedule) => {
   const dayKey = dayMap[dayOfWeek];
   const daySchedule = schedule[dayKey];
 
-  // Verifica se é um dia de trabalho e se possui os horários definidos
   if (!daySchedule || !daySchedule.isWorkDay || !daySchedule.entry || !daySchedule.exit) {
-    // Tenta usar o formato antigo como fallback para compatibilidade
     if (dayOfWeek >= 1 && dayOfWeek <= 5 && schedule.weekday?.entry && schedule.weekday?.exit) {
       const { entry, exit, breakStart, breakEnd } = schedule.weekday;
       const [entryH, entryM] = entry.split(":").map(Number);
@@ -83,6 +80,7 @@ const getExpectedWorkMillis = (dayOfWeek, schedule) => {
 
   return totalMillis - breakMillis;
 };
+
 
 const getDatesInRange = (startDateStr, endDateStr) => {
   const dates = [];
@@ -159,7 +157,7 @@ export function ReportView({ user, onBack }) {
         const dateKey = date.toLocaleDateString('pt-BR');
         reportPeriod[dateKey] = {
           punches: [], totalWorkMillis: 0, totalBreakMillis: 0, dailyBalanceMillis: 0,
-          isMedicalCertificate: false, justification: null, status: 'NO_RECORD'
+          isMedicalCertificate: false, justification: null, status: 'NO_RECORD', isComplete: false
         };
       });
 
@@ -201,13 +199,18 @@ export function ReportView({ user, onBack }) {
               clockInTime = null;
             }
           });
+          
+          dayData.isComplete = dayData.punches.some(p => p.type === 'Saída');
 
           dayData.totalWorkMillis -= dayData.totalBreakMillis;
           const expectedWorkMillis = getExpectedWorkMillis(dayOfWeek, employeeProfile.workHours);
           dayData.dailyBalanceMillis = dayData.totalWorkMillis - expectedWorkMillis;
 
           grandTotalWorkMillis += dayData.totalWorkMillis;
-          grandTotalBalanceMillis += dayData.dailyBalanceMillis;
+          
+          if (dayData.isComplete || expectedWorkMillis === 0) {
+            grandTotalBalanceMillis += dayData.dailyBalanceMillis;
+          }
         }
       }
 
@@ -284,7 +287,7 @@ export function ReportView({ user, onBack }) {
 
   const handleShowOnMap = (location) => {
     if (location && location.lat && location.lon) {
-      const url = `https://www.google.com/maps?q=${location.lat},${location.lon}`;
+      const url = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lon}`;
       window.open(url, "_blank", "noopener,noreferrer");
     } else {
       toast.error("Coordenadas não encontradas para este registro.");
@@ -315,7 +318,8 @@ export function ReportView({ user, onBack }) {
       })
       csvRows.push([`"Total Trabalhado (${date})"`, "", "", `"${formatMillisToHours(data.totalWorkMillis)}"`])
       csvRows.push([`"Total em Intervalo (${date})"`, "", "", `"${formatMillisToHours(data.totalBreakMillis)}"`])
-      csvRows.push([`"Saldo do Dia (${date})"`, "", "", `"${formatMillisToHours(data.dailyBalanceMillis, true)}"`])
+      const dailyBalanceText = data.isComplete ? formatMillisToHours(data.dailyBalanceMillis, true) : 'Em andamento';
+      csvRows.push([`"Saldo do Dia (${date})"`, "", "", `"${dailyBalanceText}"`])
       csvRows.push([])
     }
     csvRows.push([`"Total de Horas Trabalhadas no Período"`, "", "", `"${reportData.grandTotal}"`])
@@ -355,15 +359,14 @@ export function ReportView({ user, onBack }) {
 
     const tableHeaders = [["Data", "Unidade", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
     const tableData = []
-    const bodyStyles = {}
-
+    
     const sortedDates = Object.entries(reportData.groupedEntries).sort(([dateA], [dateB]) => {
       const [dayA, monthA, yearA] = dateA.split('/');
       const [dayB, monthB, yearB] = dateB.split('/');
       return new Date(`${yearA}-${monthA}-${dayA}`) - new Date(`${yearB}-${monthB}-${dayB}`);
     });
 
-    sortedDates.forEach(([date, data], index) => {
+    sortedDates.forEach(([date, data]) => {
       if (data.status === 'MEDICAL_CERTIFICATE') {
         tableData.push([date, { content: `ATESTADO: ${data.justification}`, colSpan: 7, styles: { fontStyle: 'italic', textColor: [100, 100, 100] } }])
       } else if (data.status === 'HAS_PUNCHES') {
@@ -372,7 +375,8 @@ export function ReportView({ user, onBack }) {
         const breakEndTime = data.punches.find((p) => p.type === "Fim do Intervalo")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
         const exitTime = data.punches.find((p) => p.type === "Saída")?.time.toLocaleTimeString("pt-BR") || "--:--:--"
         const totalWork = formatMillisToHours(data.totalWorkMillis)
-        const dailyBalance = formatMillisToHours(data.dailyBalanceMillis, true)
+        const dailyBalance = data.isComplete ? formatMillisToHours(data.dailyBalanceMillis, true) : '--:--';
+
 
         const locations = new Set(data.punches.map(p => p.locationName).filter(Boolean));
         let unitDisplay = "N/D";
@@ -433,15 +437,15 @@ export function ReportView({ user, onBack }) {
 
     // Fallback para o formato antigo
     if (!daySchedule) {
-      if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
-        daySchedule = schedule.saturday;
-      } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        daySchedule = schedule.weekday;
-      } else {
-        return "text-gray-600";
-      }
+        if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
+            daySchedule = schedule.saturday;
+        } else if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+            daySchedule = schedule.weekday;
+        } else {
+            return "text-gray-600";
+        }
     }
-
+    
     if (!daySchedule || !daySchedule.isWorkDay) return "text-gray-600";
 
     const scheduleMap = {
@@ -463,6 +467,7 @@ export function ReportView({ user, onBack }) {
       return "text-red-600 font-semibold"
     }
   }
+
 
   return (
     <>
@@ -649,17 +654,13 @@ export function ReportView({ user, onBack }) {
                           </p>
                         </div>
                         <div
-                          className={`p-4 rounded-lg text-center ${dailyBalanceIsNegative ? "bg-red-100" : "bg-blue-100"}`}
+                          className={`p-4 rounded-lg text-center ${!data.isComplete ? 'bg-gray-100' : dailyBalanceIsNegative ? "bg-red-100" : "bg-blue-100"}`}
                         >
-                          <p
-                            className={`text-sm font-medium ${dailyBalanceIsNegative ? "text-red-800" : "text-blue-800"}`}
-                          >
+                          <p className={`text-sm font-medium ${!data.isComplete ? "text-gray-800" : dailyBalanceIsNegative ? "text-red-800" : "text-blue-800"}`}>
                             Saldo do Dia
                           </p>
-                          <p
-                            className={`text-2xl font-bold ${dailyBalanceIsNegative ? "text-red-700" : "text-blue-700"}`}
-                          >
-                            {formatMillisToHours(data.dailyBalanceMillis, true)}
+                          <p className={`text-2xl font-bold ${!data.isComplete ? "text-gray-700" : dailyBalanceIsNegative ? "text-red-700" : "text-blue-700"}`}>
+                            {data.isComplete ? formatMillisToHours(data.dailyBalanceMillis, true) : 'Em andamento'}
                           </p>
                         </div>
                       </div>
