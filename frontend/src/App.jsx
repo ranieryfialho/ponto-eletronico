@@ -26,6 +26,25 @@ const ENTRY_TYPES = {
 }
 
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
+const ALLOWED_RADIUS_METERS = 300; // Raio de tolerância em metros
+
+// Função para calcular a distância (Haversine) - Replicada do backend
+function getDistanceInMeters(lat1, lon1, lat2, lon2) {
+    if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return Infinity;
+    const R = 6371e3; // Raio da Terra em metros
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+}
+
 
 const getOfflineQueue = () => {
   try {
@@ -63,8 +82,6 @@ function App() {
   const [offlineQueue, setOfflineQueue] = useState(getOfflineQueue());
   const [isSyncing, setIsSyncing] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState('unsupported');
-
-  // NOVO: Estado para controlar se o usuário está inscrito
   const [isSubscribed, setIsSubscribed] = useState(false);
 
 
@@ -81,6 +98,7 @@ function App() {
 
     try {
       if (!navigator.onLine && !isOfflineSync) {
+        // Este erro não terá a propriedade .status, então será tratado como offline
         throw new Error("Offline. O registro será salvo localmente.");
       }
 
@@ -100,6 +118,7 @@ function App() {
       }
 
       if (!response.ok) {
+        // Lança um erro estruturado para o bloco catch diferenciar
         throw { status: response.status, message: data.error || "Ocorreu um erro desconhecido." };
       }
 
@@ -111,6 +130,16 @@ function App() {
       return { success: true, punchId: punchData.id };
 
     } catch (error) {
+      // Se o erro tem um status, foi uma rejeição do servidor. Não salva offline.
+      if (error && error.status) {
+        if (!isOfflineSync) {
+          toast.error(error.message || "O servidor rejeitou o registro.");
+          setMessage(`❌ ${error.message || "Registro rejeitado."}`);
+        }
+        return { success: false, status: error.status, error: error.message };
+      }
+      
+      // Se não, foi um erro de rede. Salva na fila offline.
       if (!isOfflineSync) {
         const newQueue = [...getOfflineQueue(), punchData];
         saveOfflineQueue(newQueue);
@@ -119,7 +148,7 @@ function App() {
         setMessage(`🕒 Registro de ${type} salvo localmente.`);
         return { success: false, offline: true, error: error.message };
       } else {
-        return { success: false, status: error.status || 500, error: error.message || "Falha de conexão ao sincronizar." };
+        return { success: false, status: 500, error: error.message || "Falha de conexão ao sincronizar." };
       }
     } finally {
       if (!isJustificationModalOpen && !isOfflineSync) {
@@ -172,7 +201,6 @@ function App() {
     setIsSyncing(false);
   }, [user, isSyncing, sendDataToServer]);
 
-  // CORREÇÃO: useEffect agora também verifica a inscrição ativa
   useEffect(() => {
     if ('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window) {
       const permission = Notification.permission;
@@ -237,6 +265,7 @@ function App() {
       setProfileLoading(true)
       try {
         const token = await auth.currentUser.getIdToken()
+        // Este endpoint agora retorna o perfil do funcionário + os endereços da empresa
         const response = await fetch(`/api/admin/employees/${user.uid}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -339,6 +368,11 @@ function App() {
   }, [timeHistory])
 
   const handleRegister = (entryType) => {
+    if (!employeeProfile || !employeeProfile.companyAddresses) {
+        toast.error("Dados da empresa ainda não foram carregados. Tente novamente em alguns segundos.");
+        return;
+    }
+
     if (navigator.connection && navigator.connection.rtt > 300) {
       toast.warn("Seu sinal de Wi-Fi parece fraco. Por favor, aproxime-se do roteador ou verifique sua conexão antes de registrar o ponto.");
       return;
@@ -354,20 +388,77 @@ function App() {
         return;
       }
     }
-    setIsLoading(true)
-    setMessage("Obtendo localização...")
+
+    setIsLoading(true);
+    setMessage("Obtendo localização...");
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const { latitude, longitude } = position.coords
-        setMessage("Validando com o servidor...")
-        sendDataToServer({ lat: latitude, lon: longitude }, entryType)
+        const { latitude, longitude } = position.coords;
+        const userLocation = { lat: latitude, lon: longitude };
+        
+        const allowedLocationType = employeeProfile.allowedLocation || 'matriz';
+
+        if (allowedLocationType !== 'externo') {
+            const companyAddresses = employeeProfile.companyAddresses || [];
+            let addressesToCheck = [];
+            
+            if (allowedLocationType === 'matriz') {
+                addressesToCheck = companyAddresses.filter(addr => addr.isMain);
+            } else if (allowedLocationType === 'filial') {
+                addressesToCheck = companyAddresses.filter(addr => !addr.isMain);
+            } else if (allowedLocationType === 'ambas') {
+                addressesToCheck = companyAddresses;
+            }
+
+            if (addressesToCheck.length === 0) {
+                toast.error("Nenhum local de trabalho cadastrado para sua permissão. Contate o administrador.");
+                setIsLoading(false);
+                return;
+            }
+
+            let isWithinRange = false;
+            let closestDistance = Infinity;
+
+            for (const address of addressesToCheck) {
+                if (address.location) {
+                    const distance = getDistanceInMeters(
+                        userLocation.lat, userLocation.lon,
+                        address.location.lat, address.location.lon
+                    );
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                    }
+                    if (distance <= ALLOWED_RADIUS_METERS) {
+                        isWithinRange = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isWithinRange) {
+                toast.error(`Você está fora do raio permitido. O local mais próximo está a ${closestDistance.toFixed(0)}m.`);
+                setIsLoading(false);
+                setMessage("Falha na validação de local.")
+                return;
+            }
+        }
+
+        setMessage("Localização validada. Enviando registro...");
+        sendDataToServer(userLocation, entryType);
       },
       (error) => {
-        toast.warn("Não foi possível obter a localização. O registro será salvo para envio posterior.");
-        sendDataToServer({ lat: null, lon: null }, entryType);
+        if (employeeProfile.allowedLocation === 'externo') {
+            toast.warn("Não foi possível obter a localização. Registrando como externo.");
+            sendDataToServer({ lat: null, lon: null }, entryType);
+        } else {
+            toast.error("Falha ao obter localização. Verifique as permissões do navegador.");
+            setIsLoading(false);
+            setMessage("Falha ao obter localização.");
+        }
       },
       { timeout: 8000, enableHighAccuracy: true }
-    )
+    );
   }
 
   const handleSubmitJustification = async (justification) => {
@@ -377,7 +468,6 @@ function App() {
     setIsLoading(false)
   }
 
-  // CORREÇÃO: Handler do toggle agora atualiza o estado `isSubscribed`
   const handleToggleNotifications = async (enabled) => {
     setIsLoading(true);
     let result;
@@ -389,12 +479,10 @@ function App() {
 
     if (result.success) {
       toast.success(result.message);
-      // Atualiza o estado da inscrição com base na ação
       setIsSubscribed(enabled);
     } else {
       toast.error(result.message);
     }
-    // Atualiza o estado da permissão geral, caso tenha sido negada
     setNotificationStatus(Notification.permission);
     setIsLoading(false);
   }
@@ -498,7 +586,6 @@ function App() {
 
           <div className="space-y-4">{renderActionButtons()}</div>
 
-          {/* Bloco do toggle de notificação Melhorado */}
           <div className="mt-6 pt-4 border-t border-gray-200">
             <Switch.Group as="div" className="flex items-center justify-between">
               <span className="flex-grow flex flex-col">

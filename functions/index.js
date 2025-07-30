@@ -79,7 +79,6 @@ app.post('/api/save-subscription', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// NOVO: Endpoint para remover a inscrição de notificação
 app.post('/api/remove-subscription', verifyFirebaseToken, async (req, res) => {
   try {
     const { subscription } = req.body;
@@ -237,7 +236,6 @@ app.post('/api/clock-in', verifyFirebaseToken, async (req, res) => {
   }
 });
 
-// ... (todas as outras rotas da API continuam aqui)
 app.get('/api/admin/company', verifyFirebaseToken, verifyAdmin, async (req, res) => {
   try {
     const adminId = req.user.uid;
@@ -356,12 +354,24 @@ app.delete('/api/admin/users/:uid', verifyFirebaseToken, verifyAdmin, async (req
   }
 });
 
-app.get('/api/admin/employees/:uid', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+// ##### ALTERAÇÃO NESTE ENDPOINT #####
+app.get('/api/admin/employees/:uid', verifyFirebaseToken, async (req, res) => { // Removido verifyAdmin para que o próprio usuário possa buscar seu perfil
   try {
     const { uid } = req.params;
     const employeeDoc = await db.collection('employees').doc(uid).get();
-    if (!employeeDoc.exists) { return res.status(200).json({}); }
-    res.status(200).json(employeeDoc.data());
+    if (!employeeDoc.exists) { return res.status(404).json({ error: 'Perfil do funcionário não encontrado.'}); }
+
+    const employeeData = employeeDoc.data();
+
+    // Adicionado: Busca os dados da empresa e anexa os endereços ao perfil do funcionário
+    if (employeeData.companyId) {
+        const companyDoc = await db.collection('companies').doc(employeeData.companyId).get();
+        if (companyDoc.exists) {
+            employeeData.companyAddresses = companyDoc.data().addresses || [];
+        }
+    }
+
+    res.status(200).json(employeeData);
   } catch (error) {
     console.error('Erro ao buscar perfil do funcionário:', error);
     res.status(500).json({ error: 'Erro interno ao buscar perfil do funcionário.' });
