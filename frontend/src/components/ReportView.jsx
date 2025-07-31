@@ -339,7 +339,7 @@ export function ReportView({ user, onBack }) {
     document.body.removeChild(link)
   }
 
-  const handleExportPDF = () => {
+   const handleExportPDF = () => {
     if (!reportData || Object.keys(reportData.groupedEntries).length === 0) {
       alert("Não há dados para exportar.")
       return
@@ -350,12 +350,13 @@ export function ReportView({ user, onBack }) {
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, "_")
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`
 
+    // Ajustes de posicionamento do cabeçalho (movido para cima)
     doc.setFontSize(18)
-    doc.text("Relatório de Ponto", 14, 22)
+    doc.text("Relatório de Ponto", 14, 20) // Y de 22 para 20
     doc.setFontSize(11)
     doc.setTextColor(100)
-    doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 30)
-    doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 36)
+    doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 28) // Y de 30 para 28
+    doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 34) // Y de 36 para 34
 
     const tableHeaders = [["Data", "Unidade", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
     const tableData = []
@@ -391,34 +392,42 @@ export function ReportView({ user, onBack }) {
     });
 
     autoTable(doc, {
-      startY: 45,
+      startY: 40, // Inicia a tabela um pouco mais acima (de 45 para 40)
       head: tableHeaders,
       body: tableData,
       theme: "striped",
       headStyles: { fillColor: [41, 128, 185] },
+      // Adiciona um fator de escala para comprimir a tabela verticalmente se necessário
+      cellPadding: 1.5,
+      styles: { fontSize: 8 },
     })
 
     let finalY = doc.lastAutoTable.finalY || 50
-    if (finalY > 220) {
-      doc.addPage()
-      finalY = 10
+    
+    // Posiciona o rodapé de totais e assinaturas próximo ao final da página
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let bottomY = pageHeight - 35; // Posição inicial para o bloco de assinaturas
+
+    // Se a tabela terminar muito perto do rodapé, movemos o rodapé para baixo dela
+    if (finalY > bottomY - 20) {
+      bottomY = finalY + 15;
     }
 
     doc.setFontSize(10)
-    doc.text("Total de Horas Trabalhadas no Período:", 14, finalY + 20)
+    doc.text("Total de Horas Trabalhadas no Período:", 14, bottomY)
     doc.setFont(undefined, "bold")
-    doc.text(reportData.grandTotal, 85, finalY + 20)
+    doc.text(reportData.grandTotal, 85, bottomY)
 
     doc.setFont(undefined, "normal")
-    doc.text("Saldo de Horas no Período:", 14, finalY + 26)
+    doc.text("Saldo de Horas no Período:", 14, bottomY + 6)
     doc.setFont(undefined, "bold")
-    doc.text(reportData.grandTotalBalance, 85, finalY + 26)
+    doc.text(reportData.grandTotalBalance, 85, bottomY + 6)
 
     doc.setFont(undefined, "normal")
-    doc.text("_________________________", 14, finalY + 45)
-    doc.text("Assinatura do Colaborador", 20, finalY + 50)
-    doc.text("_________________________", 110, finalY + 45)
-    doc.text("Assinatura do Diretor(a)", 118, finalY + 50)
+    doc.text("_________________________", 14, bottomY + 20)
+    doc.text("Assinatura do Colaborador", 20, bottomY + 25)
+    doc.text("_________________________", 110, bottomY + 20)
+    doc.text("Assinatura do Diretor(a)", 118, bottomY + 25)
 
     doc.save(fileName)
   }
