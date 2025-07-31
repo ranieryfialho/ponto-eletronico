@@ -350,13 +350,12 @@ export function ReportView({ user, onBack }) {
     const safeName = (user.displayName || user.email).replace(/[\s@.]+/g, "_")
     const fileName = `Relatorio_${safeName}_${startDate}_a_${endDate}.pdf`
 
-    // Ajustes de posicionamento do cabeçalho (movido para cima)
     doc.setFontSize(18)
-    doc.text("Relatório de Ponto", 14, 20) // Y de 22 para 20
+    doc.text("Relatório de Ponto", 14, 20)
     doc.setFontSize(11)
     doc.setTextColor(100)
-    doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 28) // Y de 30 para 28
-    doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 34) // Y de 36 para 34
+    doc.text(`Funcionário: ${user.displayName || user.email}`, 14, 28)
+    doc.text(`Período: ${formattedStartDate} a ${formattedEndDate}`, 14, 34)
 
     const tableHeaders = [["Data", "Unidade", "Entrada", "Início Interv.", "Fim Interv.", "Saída", "Total Trab.", "Saldo Dia"]]
     const tableData = []
@@ -392,23 +391,20 @@ export function ReportView({ user, onBack }) {
     });
 
     autoTable(doc, {
-      startY: 40, // Inicia a tabela um pouco mais acima (de 45 para 40)
+      startY: 40,
       head: tableHeaders,
       body: tableData,
       theme: "striped",
       headStyles: { fillColor: [41, 128, 185] },
-      // Adiciona um fator de escala para comprimir a tabela verticalmente se necessário
       cellPadding: 1.5,
       styles: { fontSize: 8 },
     })
 
     let finalY = doc.lastAutoTable.finalY || 50
-    
-    // Posiciona o rodapé de totais e assinaturas próximo ao final da página
-    const pageHeight = doc.internal.pageSize.getHeight();
-    let bottomY = pageHeight - 35; // Posição inicial para o bloco de assinaturas
 
-    // Se a tabela terminar muito perto do rodapé, movemos o rodapé para baixo dela
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let bottomY = pageHeight - 35;
+
     if (finalY > bottomY - 20) {
       bottomY = finalY + 15;
     }
@@ -444,7 +440,6 @@ export function ReportView({ user, onBack }) {
     const dayKey = dayMap[dayOfWeek];
     let daySchedule = schedule[dayKey];
 
-    // Fallback para o formato antigo
     if (!daySchedule) {
         if (dayOfWeek === 6 && schedule.saturday?.isWorkDay) {
             daySchedule = schedule.saturday;
