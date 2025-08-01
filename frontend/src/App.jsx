@@ -26,11 +26,12 @@ const ENTRY_TYPES = {
 }
 
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
-const ALLOWED_RADIUS_METERS = 300;
+const ALLOWED_RADIUS_METERS = 300; // Raio de tolerância em metros
 
+// Função para calcular a distância (Haversine) - Replicada do backend
 function getDistanceInMeters(lat1, lon1, lat2, lon2) {
     if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return Infinity;
-    const R = 6371e3;
+    const R = 6371e3; // Raio da Terra em metros
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
@@ -87,6 +88,7 @@ function App() {
   const sendDataToServer = useCallback(async (location, type, justification = null, isOfflineSync = false, offlinePunch = null) => {
     if (!isOfflineSync) setIsLoading(true);
 
+    // Cria o objeto base para o registro de ponto
     let punchData = {
       type,
       location,
@@ -370,11 +372,6 @@ function App() {
     if (!employeeProfile || !employeeProfile.companyAddresses) {
         toast.error("Dados da empresa ainda não foram carregados. Tente novamente em alguns segundos.");
         return;
-    }
-
-    if (navigator.connection && navigator.connection.rtt > 300) {
-      toast.warn("Seu sinal de Wi-Fi parece fraco. Por favor, aproxime-se do roteador ou verifique sua conexão antes de registrar o ponto.");
-      return;
     }
 
     if (lastEntryTimestamp) {
@@ -663,7 +660,7 @@ function App() {
                                           <span className={`text-sm text-gray-500 font-mono ${isRejected ? "line-through text-red-500" : ""}`}>{new Date(entry.timestamp.seconds * 1000).toLocaleTimeString("pt-BR")}</span>
                                         </div>
                                         {isRejected && entry.rejectionReason && (<p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>)}
-                                        {entry.justification && (<p className="text-xs text-blue-700 mt-1 pl-1">Justificativa: {entry.justificativa}</p>)}
+                                        {entry.justification && (<p className="text-xs text-blue-700 mt-1 pl-1">Justificativa: {entry.justification}</p>)}
                                       </li>
                                     )
                                   })}
