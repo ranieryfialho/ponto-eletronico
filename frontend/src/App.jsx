@@ -26,12 +26,11 @@ const ENTRY_TYPES = {
 }
 
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
-const ALLOWED_RADIUS_METERS = 300; // Raio de tolerância em metros
+const ALLOWED_RADIUS_METERS = 300;
 
-// Função para calcular a distância (Haversine) - Replicada do backend
 function getDistanceInMeters(lat1, lon1, lat2, lon2) {
     if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return Infinity;
-    const R = 6371e3; // Raio da Terra em metros
+    const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
@@ -88,17 +87,21 @@ function App() {
   const sendDataToServer = useCallback(async (location, type, justification = null, isOfflineSync = false, offlinePunch = null) => {
     if (!isOfflineSync) setIsLoading(true);
 
-    const punchData = offlinePunch || {
-      id: `offline-${Date.now()}`,
+    let punchData = {
       type,
       location,
       justification,
-      timestamp: new Date().toISOString(),
     };
+
+    if (isOfflineSync && offlinePunch) {
+      punchData = offlinePunch;
+    } else if (!navigator.onLine) {
+      punchData.id = `offline-${Date.now()}`;
+      punchData.timestamp = new Date().toISOString();
+    }
 
     try {
       if (!navigator.onLine && !isOfflineSync) {
-        // Este erro não terá a propriedade .status, então será tratado como offline
         throw new Error("Offline. O registro será salvo localmente.");
       }
 
@@ -118,7 +121,6 @@ function App() {
       }
 
       if (!response.ok) {
-        // Lança um erro estruturado para o bloco catch diferenciar
         throw { status: response.status, message: data.error || "Ocorreu um erro desconhecido." };
       }
 
@@ -127,10 +129,9 @@ function App() {
         setMessage(`✅ ${data.success}`);
       }
 
-      return { success: true, punchId: punchData.id };
+      return { success: true, punchId: isOfflineSync ? punchData.id : null };
 
     } catch (error) {
-      // Se o erro tem um status, foi uma rejeição do servidor. Não salva offline.
       if (error && error.status) {
         if (!isOfflineSync) {
           toast.error(error.message || "O servidor rejeitou o registro.");
@@ -138,8 +139,7 @@ function App() {
         }
         return { success: false, status: error.status, error: error.message };
       }
-      
-      // Se não, foi um erro de rede. Salva na fila offline.
+
       if (!isOfflineSync) {
         const newQueue = [...getOfflineQueue(), punchData];
         saveOfflineQueue(newQueue);
@@ -265,7 +265,6 @@ function App() {
       setProfileLoading(true)
       try {
         const token = await auth.currentUser.getIdToken()
-        // Este endpoint agora retorna o perfil do funcionário + os endereços da empresa
         const response = await fetch(`/api/admin/employees/${user.uid}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
@@ -664,7 +663,7 @@ function App() {
                                           <span className={`text-sm text-gray-500 font-mono ${isRejected ? "line-through text-red-500" : ""}`}>{new Date(entry.timestamp.seconds * 1000).toLocaleTimeString("pt-BR")}</span>
                                         </div>
                                         {isRejected && entry.rejectionReason && (<p className="text-xs text-red-700 mt-1 pl-1">Motivo: {entry.rejectionReason}</p>)}
-                                        {entry.justification && (<p className="text-xs text-blue-700 mt-1 pl-1">Justificativa: {entry.justification}</p>)}
+                                        {entry.justification && (<p className="text-xs text-blue-700 mt-1 pl-1">Justificativa: {entry.justificativa}</p>)}
                                       </li>
                                     )
                                   })}
