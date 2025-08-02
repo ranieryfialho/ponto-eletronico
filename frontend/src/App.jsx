@@ -11,6 +11,7 @@ import { Disclosure, Transition } from "@headlessui/react"
 import { JustificationModal } from "./components/JustificationModal"
 import { setupPushNotifications, unsubscribePushNotifications } from './push-setup';
 import { Switch } from '@headlessui/react'
+import { MySchedule } from "./components/MySchedule";
 
 const STATUS = {
   LOADING: "carregando...",
@@ -26,12 +27,11 @@ const ENTRY_TYPES = {
 }
 
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
-const ALLOWED_RADIUS_METERS = 300; // Raio de tolerância em metros
+const ALLOWED_RADIUS_METERS = 300; 
 
-// Função para calcular a distância (Haversine) - Replicada do backend
 function getDistanceInMeters(lat1, lon1, lat2, lon2) {
     if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return Infinity;
-    const R = 6371e3; // Raio da Terra em metros
+    const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
@@ -83,12 +83,11 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState('unsupported');
   const [isSubscribed, setIsSubscribed] = useState(false);
-
+  const [currentView, setCurrentView] = useState('punch');
 
   const sendDataToServer = useCallback(async (location, type, justification = null, isOfflineSync = false, offlinePunch = null) => {
     if (!isOfflineSync) setIsLoading(true);
 
-    // Cria o objeto base para o registro de ponto
     let punchData = {
       type,
       location,
@@ -484,7 +483,8 @@ function App() {
   }
 
   const handleLogout = () => {
-    signOut(auth)
+    signOut(auth);
+    setCurrentView('punch');
   }
 
   const renderActionButtons = () => {
@@ -549,9 +549,18 @@ function App() {
 
   const renderMainContent = () => {
     if (showAdminPanel) {
-      return <AdminPanel onBack={() => setShowAdminPanel(false)} />
+      return <AdminPanel onBack={() => setShowAdminPanel(false)} />;
     }
-
+  
+    if (currentView === 'schedule' && employeeProfile) {
+      return (
+        <MySchedule
+          workHours={employeeProfile.workHours}
+          onBack={() => setCurrentView('punch')}
+        />
+      );
+    }
+  
     return (
       <div className="w-full max-w-md">
         <div className="p-6 bg-white rounded-xl shadow-lg border border-gray-200">
@@ -567,14 +576,25 @@ function App() {
             </div>
           )}
 
-          {isAdmin && (
+          {/* ===== INÍCIO DA ALTERAÇÃO ===== */}
+          <div className="space-y-2 mb-4">
+            {isAdmin && (
+              <button
+                onClick={() => setShowAdminPanel(true)}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-colors"
+              >
+                Painel do Administrador
+              </button>
+            )}
+
             <button
-              onClick={() => setShowAdminPanel(true)}
-              className="w-full mb-4 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-colors"
+              onClick={() => setCurrentView('schedule')}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-colors"
             >
-              Painel do Administrador
+              Ver Minha Jornada de Trabalho
             </button>
-          )}
+          </div>
+          {/* ===== FIM DA ALTERAÇÃO ===== */}
 
           <div className="text-lg text-gray-700 mb-6 p-4 h-20 flex items-center justify-center bg-gray-50 rounded-lg border">
             {message}
