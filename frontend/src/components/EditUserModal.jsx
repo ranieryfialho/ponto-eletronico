@@ -29,9 +29,14 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
   const [cargo, setCargo] = useState('');
-  const [allowedLocation, setAllowedLocation] = useState('matriz');
   const [status, setStatus] = useState('ativo');
   
+  // ##### INÍCIO DA ALTERAÇÃO #####
+  // States para gerenciar os locais de ponto de forma dinâmica
+  const [availableLocations, setAvailableLocations] = useState([]);
+  const [allowedLocations, setAllowedLocations] = useState([]); 
+  // ##### FIM DA ALTERAÇÃO #####
+
   const [workHours, setWorkHours] = useState(defaultWorkHours);
   
   const [isLoading, setIsLoading] = useState(true);
@@ -52,8 +57,34 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
           const profileData = await response.json();
           setCpf(profileData.cpf || '');
           setCargo(profileData.cargo || '');
-          setAllowedLocation(profileData.allowedLocation || 'matriz');
           setStatus(profileData.status || 'ativo');
+          
+          // ##### INÍCIO DA ALTERAÇÃO #####
+          // Popula os locais disponíveis e os selecionados
+          setAvailableLocations(profileData.companyAddresses || []);
+          
+          if (Array.isArray(profileData.allowedLocations)) {
+            setAllowedLocations(profileData.allowedLocations);
+          } else if (profileData.allowedLocation) { 
+            // Lógica de compatibilidade para perfis antigos
+            if (profileData.allowedLocation === 'externo') {
+              setAllowedLocations(['externo']);
+            } else {
+              const oldLocations = [];
+              const companyAddresses = profileData.companyAddresses || [];
+              if (profileData.allowedLocation === 'matriz' || profileData.allowedLocation === 'ambas') {
+                const main = companyAddresses.find(a => a.isMain);
+                if (main) oldLocations.push(main.name);
+              }
+              if (profileData.allowedLocation === 'filial' || profileData.allowedLocation === 'ambas') {
+                 companyAddresses.filter(a => !a.isMain).forEach(a => oldLocations.push(a.name));
+              }
+              setAllowedLocations(oldLocations);
+            }
+          } else {
+            setAllowedLocations([]);
+          }
+          // ##### FIM DA ALTERAÇÃO #####
 
           if (profileData.workHours) {
             const newWorkHours = { ...defaultWorkHours };
@@ -62,7 +93,6 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                     newWorkHours[day] = { ...newWorkHours[day], ...profileData.workHours.weekday, isWorkDay: true };
                 });
             }
-            // Sobrescreve com dados novos, se existirem
              Object.keys(newWorkHours).forEach(day => {
               if (profileData.workHours[day]) {
                 newWorkHours[day] = { ...newWorkHours[day], ...profileData.workHours[day] };
@@ -97,6 +127,26 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
     }));
   };
 
+  // ##### INÍCIO DA ALTERAÇÃO #####
+  // Nova função para lidar com a seleção múltipla de locais
+  const handleLocationChange = (locationName, isChecked) => {
+    if (locationName === 'externo') {
+        // Se 'Externo' for marcado, desmarca todos os outros e seleciona apenas ele.
+        // Se for desmarcado, limpa a seleção.
+        setAllowedLocations(isChecked ? ['externo'] : []);
+    } else {
+        // Adiciona ou remove o local da lista de permitidos
+        let newAllowed = isChecked
+            ? [...allowedLocations, locationName]
+            : allowedLocations.filter(name => name !== locationName);
+        
+        // Garante que 'Externo' seja removido se qualquer outro local for selecionado
+        newAllowed = newAllowed.filter(name => name !== 'externo');
+        setAllowedLocations(newAllowed);
+    }
+  };
+  // ##### FIM DA ALTERAÇÃO #####
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -106,7 +156,10 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
       await fetch(`/api/admin/users/${user.uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocation, status }),
+        // ##### INÍCIO DA ALTERAÇÃO #####
+        // Envia o array 'allowedLocations' para o backend
+        body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocations, status }),
+        // ##### FIM DA ALTERAÇÃO #####
       });
       toast.success("Perfil do funcionário atualizado!");
       onSuccess();
@@ -151,16 +204,44 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                       <p className="mt-2 text-xs text-gray-500">Funcionários inativos são destacados na lista e não podem registrar ponto.</p>
                     </div>
 
+                    {/* ##### INÍCIO DA ALTERAÇÃO ##### */}
+                    {/* Substituição do <select> por checkboxes dinâmicos */}
                     <div className="pt-4 border-t">
-                      <label htmlFor="location" className="block text-sm font-medium text-gray-700">Local de Ponto Permitido</label>
-                      <select id="location" name="location" value={allowedLocation} onChange={(e) => setAllowedLocation(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 py-2 pl-3 pr-10">
-                        <option value="matriz">Apenas Matriz</option>
-                        <option value="filial">Apenas Filial</option>
-                        <option value="ambas">Ambas</option>
-                        <option value="externo">Externo</option>
-                      </select>
-                      <p className="mt-2 text-xs text-gray-500">Colaboradores 'Externo' podem registrar o ponto em qualquer localização.</p>
+                      <label className="block text-sm font-medium text-gray-700">Local de Ponto Permitido</label>
+                      <div className="mt-2 space-y-2">
+                          <div className="flex items-center">
+                              <input
+                                  id="location-externo"
+                                  name="location-externo"
+                                  type="checkbox"
+                                  checked={allowedLocations.includes('externo')}
+                                  onChange={(e) => handleLocationChange('externo', e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              />
+                              <label htmlFor="location-externo" className="ml-3 block text-sm text-gray-900">
+                                  Externo (Pode bater ponto de qualquer lugar)
+                              </label>
+                          </div>
+
+                          {availableLocations.map(location => (
+                              <div key={location.name} className="flex items-center">
+                                  <input
+                                      id={`location-${location.name}`}
+                                      name={`location-${location.name}`}
+                                      type="checkbox"
+                                      checked={allowedLocations.includes(location.name)}
+                                      disabled={allowedLocations.includes('externo')}
+                                      onChange={(e) => handleLocationChange(location.name, e.target.checked)}
+                                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                                  />
+                                  <label htmlFor={`location-${location.name}`} className={`ml-3 block text-sm ${allowedLocations.includes('externo') ? 'text-gray-400' : 'text-gray-900'}`}>
+                                      {location.name} <span className="text-xs text-gray-500">({location.fullAddress})</span>
+                                  </label>
+                              </div>
+                          ))}
+                      </div>
                     </div>
+                    {/* ##### FIM DA ALTERAÇÃO ##### */}
 
                     <div className="pt-4 border-t">
                         <h3 className="text-md font-semibold text-gray-700">Jornada de Trabalho Semanal</h3>
