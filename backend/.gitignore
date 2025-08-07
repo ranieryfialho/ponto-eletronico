@@ -1,3 +1,7 @@
 firebase-service-account.json
 
 node_modules/
+
+remove-admin.js
+
+set-admin.js
