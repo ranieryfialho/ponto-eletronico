@@ -30,12 +30,9 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
   const [cpf, setCpf] = useState('');
   const [cargo, setCargo] = useState('');
   const [status, setStatus] = useState('ativo');
-  
-  // ##### INÍCIO DA ALTERAÇÃO #####
-  // States para gerenciar os locais de ponto de forma dinâmica
+
   const [availableLocations, setAvailableLocations] = useState([]);
   const [allowedLocations, setAllowedLocations] = useState([]); 
-  // ##### FIM DA ALTERAÇÃO #####
 
   const [workHours, setWorkHours] = useState(defaultWorkHours);
   
@@ -58,15 +55,12 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
           setCpf(profileData.cpf || '');
           setCargo(profileData.cargo || '');
           setStatus(profileData.status || 'ativo');
-          
-          // ##### INÍCIO DA ALTERAÇÃO #####
-          // Popula os locais disponíveis e os selecionados
+
           setAvailableLocations(profileData.companyAddresses || []);
           
           if (Array.isArray(profileData.allowedLocations)) {
             setAllowedLocations(profileData.allowedLocations);
           } else if (profileData.allowedLocation) { 
-            // Lógica de compatibilidade para perfis antigos
             if (profileData.allowedLocation === 'externo') {
               setAllowedLocations(['externo']);
             } else {
@@ -84,7 +78,6 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
           } else {
             setAllowedLocations([]);
           }
-          // ##### FIM DA ALTERAÇÃO #####
 
           if (profileData.workHours) {
             const newWorkHours = { ...defaultWorkHours };
@@ -127,25 +120,18 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
     }));
   };
 
-  // ##### INÍCIO DA ALTERAÇÃO #####
-  // Nova função para lidar com a seleção múltipla de locais
   const handleLocationChange = (locationName, isChecked) => {
     if (locationName === 'externo') {
-        // Se 'Externo' for marcado, desmarca todos os outros e seleciona apenas ele.
-        // Se for desmarcado, limpa a seleção.
         setAllowedLocations(isChecked ? ['externo'] : []);
     } else {
-        // Adiciona ou remove o local da lista de permitidos
         let newAllowed = isChecked
             ? [...allowedLocations, locationName]
             : allowedLocations.filter(name => name !== locationName);
-        
-        // Garante que 'Externo' seja removido se qualquer outro local for selecionado
+
         newAllowed = newAllowed.filter(name => name !== 'externo');
         setAllowedLocations(newAllowed);
     }
   };
-  // ##### FIM DA ALTERAÇÃO #####
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -156,10 +142,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
       await fetch(`/api/admin/users/${user.uid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        // ##### INÍCIO DA ALTERAÇÃO #####
-        // Envia o array 'allowedLocations' para o backend
         body: JSON.stringify({ displayName, email, cpf, cargo, workHours, allowedLocations, status }),
-        // ##### FIM DA ALTERAÇÃO #####
       });
       toast.success("Perfil do funcionário atualizado!");
       onSuccess();

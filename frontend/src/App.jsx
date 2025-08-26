@@ -15,11 +15,7 @@ import "react-toastify/dist/ReactToastify.css";
 import { Footer } from "./components/Footer";
 import { Disclosure, Transition } from "@headlessui/react";
 import { JustificationModal } from "./components/JustificationModal";
-import {
-  setupPushNotifications,
-  unsubscribePushNotifications,
-} from "./push-setup";
-import { Switch } from "@headlessui/react";
+import { ConfirmationModal } from "./components/ConfirmationModal";
 import { MySchedule } from "./components/MySchedule";
 
 const STATUS = {
@@ -91,9 +87,10 @@ function App() {
 
   const [offlineQueue, setOfflineQueue] = useState(getOfflineQueue());
   const [isSyncing, setIsSyncing] = useState(false);
-  const [notificationStatus, setNotificationStatus] = useState("unsupported");
-  const [isSubscribed, setIsSubscribed] = useState(false);
   const [currentView, setCurrentView] = useState("punch");
+
+  const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
+  const [confirmationAction, setConfirmationAction] = useState(null);
 
   const sendDataToServer = useCallback(
     async (
@@ -245,24 +242,6 @@ function App() {
 
     setIsSyncing(false);
   }, [user, isSyncing, sendDataToServer]);
-
-  useEffect(() => {
-    if (
-      "serviceWorker" in navigator &&
-      "PushManager" in window &&
-      "Notification" in window
-    ) {
-      const permission = Notification.permission;
-      setNotificationStatus(permission);
-      if (permission === "granted") {
-        navigator.serviceWorker.ready.then((reg) => {
-          reg.pushManager.getSubscription().then((sub) => {
-            setIsSubscribed(!!sub);
-          });
-        });
-      }
-    }
-  }, []);
 
   useEffect(() => {
     if (timeToWait > 0) {
@@ -428,6 +407,33 @@ function App() {
   }, [timeHistory]);
 
   const handleRegister = (entryType) => {
+    const messages = {
+      [ENTRY_TYPES.CLOCK_IN]: {
+        title: "Confirmar Entrada",
+        message: "Você tem certeza que deseja iniciar o expediente?",
+      },
+      [ENTRY_TYPES.BREAK_START]: {
+        title: "Confirmar Pausa",
+        message: "Você tem certeza que deseja iniciar a pausa?",
+      },
+      [ENTRY_TYPES.BREAK_END]: {
+        title: "Confirmar Retorno",
+        message: "Você tem certeza que deseja retornar do intervalo?",
+      },
+      [ENTRY_TYPES.CLOCK_OUT]: {
+        title: "Confirmar Saída",
+        message: "Você tem certeza que deseja encerrar o expediente?",
+      },
+    };
+
+    setConfirmationAction({ type: entryType, ...messages[entryType] });
+    setIsConfirmationModalOpen(true);
+  };
+
+  const executeRegistration = () => {
+    if (!confirmationAction) return;
+    const entryType = confirmationAction.type;
+
     if (!employeeProfile || !employeeProfile.companyAddresses) {
       toast.error(
         "Dados da empresa ainda não foram carregados. Tente novamente em alguns segundos."
@@ -531,29 +537,15 @@ function App() {
     );
   };
 
+  const handleConfirmAction = () => {
+    setIsConfirmationModalOpen(false);
+    executeRegistration();
+  };
+
   const handleSubmitJustification = async (justification) => {
     await sendDataToServer(lateEntryLocation, "Entrada", justification);
     setIsJustificationModalOpen(false);
     setLateEntryLocation(null);
-    setIsLoading(false);
-  };
-
-  const handleToggleNotifications = async (enabled) => {
-    setIsLoading(true);
-    let result;
-    if (enabled) {
-      result = await setupPushNotifications();
-    } else {
-      result = await unsubscribePushNotifications();
-    }
-
-    if (result.success) {
-      toast.success(result.message);
-      setIsSubscribed(enabled);
-    } else {
-      toast.error(result.message);
-    }
-    setNotificationStatus(Notification.permission);
     setIsLoading(false);
   };
 
@@ -688,53 +680,9 @@ function App() {
 
           <div className="space-y-4">{renderActionButtons()}</div>
 
-          <div className="mt-6 pt-4 border-t border-gray-200">
-            <Switch.Group
-              as="div"
-              className="flex items-center justify-between"
-            >
-              <span className="flex-grow flex flex-col">
-                <Switch.Label
-                  as="span"
-                  className="text-sm font-medium text-gray-900"
-                  passive
-                >
-                  Lembretes de Ponto
-                </Switch.Label>
-                <Switch.Description as="span" className="text-sm text-gray-500">
-                  {notificationStatus === "unsupported"
-                    ? "Seu navegador não suporta notificações."
-                    : notificationStatus === "denied"
-                    ? "Notificações bloqueadas pelo navegador."
-                    : isSubscribed
-                    ? "Lembretes ativados neste dispositivo."
-                    : "Ative para receber avisos."}
-                </Switch.Description>
-              </span>
-              <Switch
-                checked={isSubscribed}
-                onChange={handleToggleNotifications}
-                disabled={
-                  notificationStatus !== "default" &&
-                  notificationStatus !== "granted"
-                }
-                className={`${
-                  isSubscribed ? "bg-indigo-600" : "bg-gray-200"
-                } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`${
-                    isSubscribed ? "translate-x-5" : "translate-x-0"
-                  } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-                />
-              </Switch>
-            </Switch.Group>
-          </div>
-
           <button
             onClick={handleLogout}
-            className="w-full mt-4 flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg hover:bg-gray-100 transition-colors shadow-sm"
+            className="w-full mt-6 flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-medium py-2 px-4 rounded-lg hover:bg-gray-100 transition-colors shadow-sm"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -925,6 +873,13 @@ function App() {
           setIsLoading(false);
         }}
         onSubmit={handleSubmitJustification}
+      />
+      <ConfirmationModal
+        isOpen={isConfirmationModalOpen}
+        onClose={() => setIsConfirmationModalOpen(false)}
+        onConfirm={handleConfirmAction}
+        title={confirmationAction?.title || "Confirmar Ação"}
+        message={confirmationAction?.message || "Você tem certeza?"}
       />
       <div className="min-h-screen flex flex-col bg-gray-50">
         <main className="flex-grow flex flex-col items-center justify-center p-4">
