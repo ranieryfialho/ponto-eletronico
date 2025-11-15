@@ -4,6 +4,7 @@ import { EditUserModal } from "./EditUserModal";
 import { ReportView } from "./ReportView";
 import { PendingApprovals } from "./PendingApprovals";
 import { CompanyProfile } from "./CompanyProfile";
+import { KioskManagement } from "./KioskManagement";
 import { toast } from "react-toastify";
 
 const Tag = ({ text, color }) => {
@@ -78,8 +79,6 @@ function ManageUsersView() {
     );
   }, [users, searchTerm]);
 
-  // ##### INÍCIO DA ALTERAÇÃO #####
-  // Esta função agora serve como fallback para dados antigos.
   const getLocationTag_Fallback = (location) => {
     switch (location) {
       case "matriz":
@@ -95,24 +94,21 @@ function ManageUsersView() {
     }
   };
 
-  // Nova função para renderizar as tags de forma dinâmica
   const renderLocationTags = (locationData) => {
-    // Se for um array (novo formato), mapeia cada local para uma Tag
     if (Array.isArray(locationData)) {
       if (locationData.length === 0) {
         return <Tag text="Nenhum Local" color="red" />;
       }
       return locationData.map((locName) => {
-        let color = "purple"; // Cor padrão para filiais
+        let color = "purple";
         if (locName.toLowerCase().includes("matriz")) color = "blue";
         if (locName.toLowerCase().includes("externo")) color = "orange";
         return <Tag key={locName} text={locName} color={color} />;
       });
     }
-    // Se for uma string (formato antigo), usa a função de fallback
+
     return getLocationTag_Fallback(locationData);
   };
-  // ##### FIM DA ALTERAÇÃO #####
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -475,6 +471,8 @@ export function AdminPanel({ onBack }) {
         return <PendingApprovals />;
       case "company":
         return <CompanyProfile />;
+      case "kiosks":
+        return <KioskManagement />;
       default:
         return (
           <div className="space-y-6">
@@ -521,6 +519,19 @@ export function AdminPanel({ onBack }) {
                   Cadastre os dados e os locais de ponto.
                 </p>
               </button>
+
+              <button
+                onClick={() => setView("kiosks")}
+                className="text-left p-6 bg-white hover:bg-gray-50 rounded-xl shadow-md border border-gray-200 transition-all duration-300 hover:shadow-lg hover:-translate-y-1"
+              >
+                <h3 className="text-lg font-semibold text-gray-800">
+                  Gerenciar Kiosks
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Cadastre os terminais de ponto (computadores).
+                </p>
+              </button>
+
             </div>
           </div>
         );

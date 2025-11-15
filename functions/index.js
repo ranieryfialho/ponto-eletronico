@@ -2,6 +2,7 @@ const functions = require("firebase-functions");
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const crypto = require("crypto");
 const { db, admin } = require("./firebase-config.js");
 const { getDistanceInMeters } = require("./haversine.js");
 
@@ -49,7 +50,7 @@ const verifyAdmin = async (req, res, next) => {
 app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { location, type, justification, timestamp } = req.body;
+    const { location, type, justification, timestamp, kioskToken } = req.body;
     const requestIp = req.ip;
     const now = timestamp ? new Date(timestamp) : new Date();
 
@@ -63,6 +64,7 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
         });
     }
     const employeeProfile = employeeDoc.data();
+    const { companyId } = employeeProfile; 
 
     if (employeeProfile.status === "inativo") {
       return res
@@ -101,23 +103,51 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
 
     let isValidLocation = false;
     let locationName = null;
+    let locationData = null; 
 
-    if (allowedLocations.includes("externo") || !location || !location.lat) {
+    // Prioridade 1: Permissão "Externo"
+    if (allowedLocations.includes("externo")) {
       isValidLocation = true;
-      locationName = allowedLocations.includes("externo")
-        ? "Externo"
-        : "Localização Indisponível";
-    } else {
-      const companyDoc = await db
-        .collection("companies")
-        .doc(employeeProfile.companyId)
+      locationName = "Externo";
+      if (location && location.lat) {
+        locationData = location;
+      }
+    
+    // Prioridade 2: Validação por Kiosk (se um token foi enviado)
+    } else if (kioskToken) {
+      functions.logger.log(`[DEBUG] Iniciando validação por Kiosk para usuário: ${userId}`);
+      
+      if (!allowedLocations.includes("kiosk")) {
+        functions.logger.warn(`[DEBUG] Falha: Usuário ${userId} não tem permissão "kiosk".`);
+        return res.status(403).json({ error: "Você não tem permissão para registrar o ponto neste Kiosk." });
+      }
+
+      const kioskQuery = await db.collection('kiosks')
+        .where('companyId', '==', companyId)
+        .where('authToken', '==', kioskToken)
+        .where('isActive', '==', true)
+        .limit(1)
         .get();
+
+      if (kioskQuery.empty) {
+        functions.logger.warn(`[DEBUG] Falha: Token do Kiosk inválido ou não encontrado para empresa ${companyId}.`);
+        return res.status(401).json({ error: "Kiosk não autorizado ou token inválido." });
+      }
+
+      const kioskDoc = kioskQuery.docs[0].data();
+      isValidLocation = true;
+      locationName = kioskDoc.name; 
+      locationData = null; 
+      functions.logger.log(`[DEBUG] Sucesso: Kiosk "${kioskDoc.name}" validado para usuário ${userId}.`);
+
+    // Prioridade 3: Validação por Geolocalização (lógica original)
+    } else if (location && location.lat) {
+      functions.logger.log(`[DEBUG] Iniciando validação por Geolocalização para usuário: ${userId}`);
+      locationData = location; 
+      
+      const companyDoc = await db.collection("companies").doc(companyId).get();
       if (!companyDoc.exists) {
-        return res
-          .status(400)
-          .json({
-            error: "Dados da empresa não encontrados. Contate o administrador.",
-          });
+        return res.status(400).json({ error: "Dados da empresa não encontrados." });
       }
       const companyData = companyDoc.data();
       const allCompanyAddresses = companyData.addresses || [];
@@ -125,38 +155,16 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
       const addressesToCheck = allCompanyAddresses.filter((addr) =>
         allowedLocations.includes(addr.name)
       );
-
-      // ===== INÍCIO DOS LOGS DE DEPURAÇÃO =====
-      functions.logger.log(
-        `[DEBUG] Tentativa de ponto para o usuário: ${userId}`
-      );
-      functions.logger.log(
-        "[DEBUG] Coordenadas recebidas do celular:",
-        location
-      );
-      functions.logger.log(
-        "[DEBUG] Permissões de local do usuário:",
-        allowedLocations
-      );
-      functions.logger.log(
-        "[DEBUG] Endereços da empresa que serão verificados:",
-        addressesToCheck.map((a) => ({ name: a.name, coords: a.location }))
-      );
-      // ===== FIM DOS LOGS DE DEPURAÇÃO =====
+      
+      functions.logger.log("[DEBUG] Permissões do usuário:", allowedLocations);
+      functions.logger.log("[DEBUG] Endereços a verificar:", addressesToCheck.map(a => a.name));
 
       if (addressesToCheck.length === 0) {
-        functions.logger.error(
-          "[DEBUG] Nenhum endereço correspondente encontrado para as permissões do usuário."
-        );
-        return res
-          .status(400)
-          .json({
-            error: `Você não tem permissão para registrar o ponto em nenhum local.`,
-          });
+        functions.logger.error("[DEBUG] Nenhum endereço correspondente para as permissões.");
+        return res.status(400).json({ error: `Você não tem permissão para registrar o ponto em nenhum local.` });
       }
 
       let closestDistance = Infinity;
-
       for (const address of addressesToCheck) {
         if (address.location) {
           const distance = getDistanceInMeters(
@@ -165,18 +173,10 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
             address.location.lat,
             address.location.lon
           );
+          
+          functions.logger.log(`[DEBUG] Distância para "${address.name}": ${distance.toFixed(2)}m.`);
 
-          // ===== LOG DE DEPURAÇÃO DENTRO DO LOOP =====
-          functions.logger.log(
-            `[DEBUG] Distância calculada para "${
-              address.name
-            }": ${distance.toFixed(2)} metros.`
-          );
-          // ===== FIM DO LOG =====
-
-          if (distance < closestDistance) {
-            closestDistance = distance;
-          }
+          if (distance < closestDistance) closestDistance = distance;
           if (distance <= ALLOWED_RADIUS_METERS) {
             isValidLocation = true;
             locationName = address.name;
@@ -186,21 +186,20 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
       }
 
       if (!isValidLocation) {
-        functions.logger.warn(
-          `[DEBUG] Validação de local falhou. Distância mínima encontrada: ${closestDistance.toFixed(
-            2
-          )}m.`
-        );
-        return res
-          .status(400)
-          .json({
-            error: `Você está fora do raio permitido para seus locais. O local mais próximo está a ${closestDistance.toFixed(
-              0
-            )}m.`,
-          });
+        functions.logger.warn(`[DEBUG] Falha na validação de local. Distância mínima: ${closestDistance.toFixed(2)}m.`);
+        return res.status(400).json({
+            error: `Você está fora do raio permitido. O local mais próximo está a ${closestDistance.toFixed(0)}m.`,
+        });
       }
-    }
+      
+      functions.logger.log(`[DEBUG] Sucesso: Geolocalização validada em "${locationName}".`);
 
+    // Prioridade 4: Nenhuma validação possível
+    } else {
+      functions.logger.warn(`[DEBUG] Falha: Nenhum método de validação fornecido (Externo, Kiosk ou GPS) para usuário ${userId}.`);
+      return res.status(400).json({ error: "Não foi possível validar seu local. Ative a geolocalização ou use um Kiosk autorizado." });
+    }
+    
     let entryStatus = "aprovado";
     let successMessage = `Registro de '${type}' realizado com sucesso em "${locationName}"!`;
     let finalJustification = justification || null;
@@ -208,15 +207,7 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
     if (type === "Entrada" && employeeProfile.workHours) {
       const schedule = employeeProfile.workHours;
       const dayOfWeek = now.getDay();
-      const dayMap = {
-        0: "sunday",
-        1: "monday",
-        2: "tuesday",
-        3: "wednesday",
-        4: "thursday",
-        5: "friday",
-        6: "saturday",
-      };
+      const dayMap = { 0: "sunday", 1: "monday", 2: "tuesday", 3: "wednesday", 4: "thursday", 5: "friday", 6: "saturday" };
       const dayKey = dayMap[dayOfWeek];
       const daySchedule = schedule[dayKey];
 
@@ -230,25 +221,22 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
         );
 
         if (latenessMinutes > 120) {
-          if (timestamp) {
+          if (timestamp) { 
             entryStatus = "pendente_aprovacao";
-            finalJustification =
-              justification ||
-              "Registro offline com atraso. Requer validação do gestor.";
-            successMessage =
-              "Registro offline sincronizado, mas aguardando aprovação.";
-          } else {
+            finalJustification = justification || "Registro offline com atraso. Requer validação do gestor.";
+            successMessage = "Registro offline sincronizado, mas aguardando aprovação.";
+          } else if (kioskToken) { 
+            finalJustification = `Registro em Kiosk com ${latenessMinutes} min de atraso.`;
+            successMessage = "Registro em Kiosk realizado com atraso.";
+          } else { 
             if (!justification) {
-              return res
-                .status(422)
-                .json({
+              return res.status(422).json({
                   error: "Justificativa necessária.",
                   requiresJustification: true,
-                });
+              });
             }
             entryStatus = "pendente_aprovacao";
-            successMessage =
-              "Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.";
+            successMessage = "Registro de entrada realizado, mas aguardando aprovação do gestor devido a atraso.";
           }
         }
       }
@@ -259,19 +247,20 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
       displayName:
         req.user.name || employeeProfile.displayName || req.user.email,
       timestamp: now,
-      location,
-      locationName,
+      location: locationData, 
+      locationName, 
       type,
       validatedIp: requestIp,
       status: entryStatus,
       justification: finalJustification,
       isOffline: !!timestamp,
+      isKiosk: !!kioskToken, 
     };
     await db.collection("timeEntries").add(timeRecord);
     res.status(201).json({ success: successMessage });
   } catch (error) {
     console.error("Erro no servidor ao registrar ponto:", error);
-    functions.logger.error("Erro não capturado no /api/clock-in:", error); // Log extra para qualquer erro
+    functions.logger.error("Erro não capturado no /api/clock-in:", error);
     res.status(500).json({ error: "Ocorreu um erro interno no servidor." });
   }
 });
@@ -411,10 +400,7 @@ app.get(
             email: userRecord.email,
             displayName: userRecord.displayName,
             status: profileData.status || "ativo",
-            location:
-              profileData.allowedLocations ||
-              profileData.allowedLocation ||
-              "matriz",
+            location: profileData.allowedLocations || [],
           };
         })
       );
@@ -842,5 +828,102 @@ app.post(
     }
   }
 );
+
+// ##### ROTAS DE KIOSK #####
+
+app.get("/api/admin/kiosks", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const adminDoc = await db.collection("employees").doc(req.user.uid).get();
+    if (!adminDoc.exists || !adminDoc.data().companyId) {
+      return res.status(400).json({ error: "Administrador não vinculado a uma empresa." });
+    }
+    const { companyId } = adminDoc.data();
+
+    const kiosksSnapshot = await db.collection("kiosks")
+      .where("companyId", "==", companyId)
+      .get();
+
+    const kiosks = kiosksSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name,
+        isActive: data.isActive,
+        createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : null, 
+      };
+    });
+
+    kiosks.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    res.status(200).json(kiosks);
+  } catch (error) {
+    console.error("Erro ao listar kiosks:", error);
+    res.status(500).json({ error: "Erro interno ao listar kiosks." });
+  }
+});
+
+app.post("/api/admin/kiosks", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "O nome do Kiosk é obrigatório." });
+    }
+
+    const adminDoc = await db.collection("employees").doc(req.user.uid).get();
+    if (!adminDoc.exists || !adminDoc.data().companyId) {
+      return res.status(400).json({ error: "Administrador não vinculado a uma empresa. Cadastre o perfil da empresa primeiro." });
+    }
+    const { companyId } = adminDoc.data();
+
+    const authToken = crypto.randomBytes(32).toString("hex");
+
+    const newKiosk = {
+      companyId,
+      name,
+      authToken, 
+      isActive: true,
+      createdAt: new Date(),
+    };
+
+    const docRef = await db.collection("kiosks").add(newKiosk);
+    
+    res.status(201).json({
+      success: "Kiosk criado com sucesso!",
+      kiosk: { id: docRef.id, name: newKiosk.name, isActive: newKiosk.isActive },
+      authToken: newKiosk.authToken 
+    });
+  } catch (error) {
+    console.error("Erro ao criar kiosk:", error);
+    res.status(500).json({ error: "Erro interno ao criar kiosk." });
+  }
+});
+
+app.delete("/api/admin/kiosks/:kioskId", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const { kioskId } = req.params;
+    const adminDoc = await db.collection("employees").doc(req.user.uid).get();
+    if (!adminDoc.exists || !adminDoc.data().companyId) {
+      return res.status(400).json({ error: "Administrador não vinculado a uma empresa." });
+    }
+    const { companyId } = adminDoc.data();
+
+    const kioskRef = db.collection("kiosks").doc(kioskId);
+    const kioskDoc = await kioskRef.get();
+
+    if (!kioskDoc.exists) {
+      return res.status(404).json({ error: "Kiosk não encontrado." });
+    }
+
+    if (kioskDoc.data().companyId !== companyId) {
+      return res.status(403).json({ error: "Acesso negado. Kiosk não pertence a esta empresa." });
+    }
+
+    await kioskRef.delete();
+    res.status(200).json({ success: "Kiosk removido com sucesso." });
+  } catch (error) {
+    console.error("Erro ao remover kiosk:", error);
+    res.status(500).json({ error: "Erro interno ao remover kiosk." });
+  }
+});
 
 exports.api = functions.https.onRequest(app);

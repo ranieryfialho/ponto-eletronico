@@ -17,6 +17,7 @@ import { Disclosure, Transition } from "@headlessui/react";
 import { JustificationModal } from "./components/JustificationModal";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { MySchedule } from "./components/MySchedule";
+import { KioskAuthorizationModal } from "./components/KioskAuthorizationModal";
 
 const STATUS = {
   LOADING: "carregando...",
@@ -92,11 +93,18 @@ function App() {
   const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
   const [confirmationAction, setConfirmationAction] = useState(null);
 
+  const [kioskToken, setKioskToken] = useState(() =>
+    localStorage.getItem("kioskToken") || null
+  );
+
+  const [isKioskModalOpen, setIsKioskModalOpen] = useState(false);
+
   const sendDataToServer = useCallback(
     async (
-      location,
+      location, 
       type,
       justification = null,
+      kioskToken = null, 
       isOfflineSync = false,
       offlinePunch = null
     ) => {
@@ -105,6 +113,7 @@ function App() {
       let punchData = {
         type,
         location,
+        kioskToken,
         justification,
       };
 
@@ -132,7 +141,7 @@ function App() {
 
         const data = await response.json();
 
-        if (response.status === 422 && data.requiresJustification) {
+        if (response.status === 422 && data.requiresJustification && !kioskToken) {
           setLateEntryLocation(location);
           setIsJustificationModalOpen(true);
           return { success: false, status: 422, error: data.error };
@@ -182,7 +191,7 @@ function App() {
         }
       }
     },
-    [user, isJustificationModalOpen]
+    [user, isJustificationModalOpen] 
   );
 
   const syncOfflineQueue = useCallback(async () => {
@@ -203,6 +212,7 @@ function App() {
         punch.location,
         punch.type,
         punch.justification,
+        punch.kioskToken, 
         true,
         punch
       );
@@ -346,7 +356,9 @@ function App() {
 
         const lastValidEntry = entries.find((e) => e.status !== "rejeitado");
         let newStatus = STATUS.CLOCKED_OUT;
-        let newMessage = "Pronto para iniciar o expediente!";
+        let newMessage = kioskToken 
+          ? "Kiosk pronto para registro." 
+          : "Pronto para iniciar o expediente!";
 
         if (lastValidEntry) {
           setLastEntryTimestamp(lastValidEntry.timestamp.seconds * 1000);
@@ -381,7 +393,7 @@ function App() {
     );
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, kioskToken]); 
 
   const groupedHistory = useMemo(() => {
     if (timeHistory.length === 0) return {};
@@ -456,6 +468,13 @@ function App() {
       }
     }
 
+    if (kioskToken) {
+      setIsLoading(true);
+      setMessage("Enviando registro do Kiosk...");
+      sendDataToServer(null, entryType, null, kioskToken);
+      return; 
+    }
+    
     setIsLoading(true);
     setMessage("Obtendo localização...");
 
@@ -516,7 +535,7 @@ function App() {
         }
 
         setMessage("Localização validada. Enviando registro...");
-        sendDataToServer(userLocation, entryType);
+        sendDataToServer(userLocation, entryType, null, null);
       },
       (error) => {
         const allowedLocations = employeeProfile.allowedLocations || [];
@@ -524,7 +543,7 @@ function App() {
           toast.warn(
             "Não foi possível obter a localização. Registrando como externo."
           );
-          sendDataToServer({ lat: null, lon: null }, entryType);
+          sendDataToServer({ lat: null, lon: null }, entryType, null, null);
         } else {
           toast.error(
             "Falha ao obter localização. Verifique as permissões do navegador."
@@ -543,7 +562,7 @@ function App() {
   };
 
   const handleSubmitJustification = async (justification) => {
-    await sendDataToServer(lateEntryLocation, "Entrada", justification);
+    await sendDataToServer(lateEntryLocation, "Entrada", justification, null);
     setIsJustificationModalOpen(false);
     setLateEntryLocation(null);
     setIsLoading(false);
@@ -553,6 +572,35 @@ function App() {
     signOut(auth);
     setCurrentView("punch");
   };
+
+  const handleAuthorizeKiosk = () => {
+    setIsKioskModalOpen(true);
+  };
+
+  const handleSubmitKioskToken = (token) => {
+    try {
+      localStorage.setItem('kioskToken', token.trim());
+      setKioskToken(token.trim());
+      toast.success('Kiosk autorizado com sucesso!');
+      setMessage('Kiosk autorizado. Pronto para registro.');
+      setIsKioskModalOpen(false);
+    } catch (err) {
+      toast.error('Não foi possível salvar o token. Verifique as permissões do navegador.');
+    }
+  };
+
+  const handleDeauthorizeKiosk = () => {
+    if (window.confirm('Tem certeza que deseja desautorizar este computador como um Kiosk?')) {
+      try {
+        localStorage.removeItem('kioskToken');
+        setKioskToken(null);
+        toast.warn('Kiosk desautorizado.');
+        setMessage('Pronto para iniciar o expediente!');
+      } catch (err) {
+        toast.error('Falha ao desautorizar.');
+      }
+    }
+  }
 
   const renderActionButtons = () => {
     if (timeToWait > 0) {
@@ -644,6 +692,14 @@ function App() {
             Bem-vindo, {user.displayName || user.email}! 👋
           </p>
 
+          {kioskToken && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-center">
+              <p className="text-sm font-semibold text-blue-700">
+                Este terminal está autorizado como Kiosk.
+              </p>
+            </div>
+          )}
+
           {offlineQueue.length > 0 && (
             <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-center animate-pulse">
               <p className="text-sm font-semibold text-orange-700">
@@ -700,6 +756,29 @@ function App() {
             </svg>
             Sair
           </button>
+
+          {isAdmin && (
+            <div className="mt-8 border-t pt-4 text-center">
+              {!kioskToken ? (
+                <button
+                  type="button"
+                  onClick={handleAuthorizeKiosk}
+                  className="text-xs text-gray-500 hover:text-blue-600 hover:underline"
+                >
+                  Autorizar este Kiosk
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDeauthorizeKiosk}
+                  className="text-xs text-red-500 hover:text-red-700 hover:underline"
+                >
+                  Desautorizar este Kiosk
+                </button>
+              )}
+            </div>
+          )}
+
         </div>
 
         {Object.keys(groupedHistory).length > 0 && (
@@ -881,6 +960,13 @@ function App() {
         title={confirmationAction?.title || "Confirmar Ação"}
         message={confirmationAction?.message || "Você tem certeza?"}
       />
+      
+      <KioskAuthorizationModal
+        isOpen={isKioskModalOpen}
+        onClose={() => setIsKioskModalOpen(false)}
+        onSubmit={handleSubmitKioskToken}
+      />
+
       <div className="min-h-screen flex flex-col bg-gray-50">
         <main className="flex-grow flex flex-col items-center justify-center p-4">
           {!user ? <Auth /> : renderMainContent()}

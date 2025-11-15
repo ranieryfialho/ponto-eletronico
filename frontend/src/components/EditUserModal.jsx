@@ -187,8 +187,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                       <p className="mt-2 text-xs text-gray-500">Funcionários inativos são destacados na lista e não podem registrar ponto.</p>
                     </div>
 
-                    {/* ##### INÍCIO DA ALTERAÇÃO ##### */}
-                    {/* Substituição do <select> por checkboxes dinâmicos */}
+                    
                     <div className="pt-4 border-t">
                       <label className="block text-sm font-medium text-gray-700">Local de Ponto Permitido</label>
                       <div className="mt-2 space-y-2">
@@ -203,6 +202,21 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                               />
                               <label htmlFor="location-externo" className="ml-3 block text-sm text-gray-900">
                                   Externo (Pode bater ponto de qualquer lugar)
+                              </label>
+                          </div>
+
+                          <div className="flex items-center">
+                              <input
+                                  id="location-kiosk"
+                                  name="location-kiosk"
+                                  type="checkbox"
+                                  checked={allowedLocations.includes('kiosk')}
+                                  disabled={allowedLocations.includes('externo')}
+                                  onChange={(e) => handleLocationChange('kiosk', e.target.checked)}
+                                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                              />
+                              <label htmlFor="location-kiosk" className={`ml-3 block text-sm ${allowedLocations.includes('externo') ? 'text-gray-400' : 'text-gray-900'}`}>
+                                  Kiosk (Registrar em computador autorizado)
                               </label>
                           </div>
 
@@ -224,7 +238,7 @@ export function EditUserModal({ isOpen, onClose, user, onSuccess }) {
                           ))}
                       </div>
                     </div>
-                    {/* ##### FIM DA ALTERAÇÃO ##### */}
+                    
 
                     <div className="pt-4 border-t">
                         <h3 className="text-md font-semibold text-gray-700">Jornada de Trabalho Semanal</h3>
