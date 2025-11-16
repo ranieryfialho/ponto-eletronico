@@ -849,7 +849,8 @@ app.get("/api/admin/kiosks", verifyFirebaseToken, verifyAdmin, async (req, res) 
         id: doc.id,
         name: data.name,
         isActive: data.isActive,
-        createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : null, 
+        createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : null,
+        authToken: data.authToken 
       };
     });
 

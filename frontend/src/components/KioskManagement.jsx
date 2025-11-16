@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase-config';
 import { toast } from 'react-toastify';
-import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentIcon, TrashIcon, KeyIcon } from '@heroicons/react/24/outline';
 
 export function KioskManagement() {
   const [kiosks, setKiosks] = useState([]);
@@ -90,6 +90,10 @@ export function KioskManagement() {
   };
 
   const copyToClipboard = (text) => {
+    if (!text) {
+      toast.error('Token não encontrado para copiar.');
+      return;
+    }
     navigator.clipboard.writeText(text).then(() => {
       toast.success('Token copiado para a área de transferência!');
     }, (err) => {
@@ -200,6 +204,13 @@ export function KioskManagement() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                      <button
+                        onClick={() => copyToClipboard(kiosk.authToken)}
+                        title="Copiar Token"
+                        className="p-2 text-gray-500 rounded-full hover:bg-blue-100 hover:text-blue-600"
+                      >
+                        <KeyIcon className="h-5 w-5" />
+                      </button>
                       <button
                         onClick={() => handleDeleteKiosk(kiosk.id, kiosk.name)}
                         title="Remover Kiosk"

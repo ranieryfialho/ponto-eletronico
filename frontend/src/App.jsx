@@ -580,10 +580,10 @@ function App() {
   const handleSubmitKioskToken = (token) => {
     try {
       localStorage.setItem('kioskToken', token.trim());
-      setKioskToken(token.trim());
+      setKioskToken(token.trim()); 
       toast.success('Kiosk autorizado com sucesso!');
       setMessage('Kiosk autorizado. Pronto para registro.');
-      setIsKioskModalOpen(false);
+      setIsKioskModalOpen(false); 
     } catch (err) {
       toast.error('Não foi possível salvar o token. Verifique as permissões do navegador.');
     }
@@ -757,13 +757,14 @@ function App() {
             Sair
           </button>
 
+          {/* ##### INÍCIO DA ALTERAÇÃO VISUAL ##### */}
           {isAdmin && (
-            <div className="mt-8 border-t pt-4 text-center">
+            <div className="mt-8 border-t pt-6">
               {!kioskToken ? (
                 <button
                   type="button"
                   onClick={handleAuthorizeKiosk}
-                  className="text-xs text-gray-500 hover:text-blue-600 hover:underline"
+                  className="w-full text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg transition-colors shadow-sm border border-gray-300"
                 >
                   Autorizar este Kiosk
                 </button>
@@ -771,13 +772,14 @@ function App() {
                 <button
                   type="button"
                   onClick={handleDeauthorizeKiosk}
-                  className="text-xs text-red-500 hover:text-red-700 hover:underline"
+                  className="w-full text-sm bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-lg transition-colors shadow-sm border border-red-300"
                 >
                   Desautorizar este Kiosk
                 </button>
               )}
             </div>
           )}
+          {/* ##### FIM DA ALTERAÇÃO VISUAL ##### */}
 
         </div>
 
