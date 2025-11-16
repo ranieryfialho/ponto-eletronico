@@ -32,8 +32,8 @@ const ENTRY_TYPES = {
   CLOCK_OUT: "Saída",
 };
 
-const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
-const ALLOWED_RADIUS_METERS = 300;
+const REGISTRATION_COOLDOWN_MS = 1 * 60 * 1000;
+const ALLOWED_RADIUS_METERS = 200;
 
 function getDistanceInMeters(lat1, lon1, lat2, lon2) {
   if (lat1 === null || lon1 === null || lat2 === null || lon2 === null)
@@ -456,8 +456,9 @@ function App() {
     if (lastEntryTimestamp) {
       const now = new Date().getTime();
       const diff = now - lastEntryTimestamp;
-      if (diff < TEN_MINUTES_IN_MS) {
-        const remaining = TEN_MINUTES_IN_MS - diff;
+      
+      if (diff < REGISTRATION_COOLDOWN_MS) {
+        const remaining = REGISTRATION_COOLDOWN_MS - diff;
         setTimeToWait(remaining);
         toast.error(
           `Aguarde ${Math.ceil(
@@ -574,7 +575,7 @@ function App() {
       executeRegistration();
     }
     
-    setConfirmationAction(null);
+    setConfirmationAction(null); 
   };
 
   const handleSubmitJustification = async (justification) => {

@@ -14,7 +14,9 @@ app.use(cors({ origin: true }));
 app.use(express.json());
 
 const ALLOWED_RADIUS_METERS = 300;
-const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
+// ##### INÍCIO DA ALTERAÇÃO #####
+const REGISTRATION_COOLDOWN_MS = 1 * 60 * 1000; // 1 Minuto (antes eram 10)
+// ##### FIM DA ALTERAÇÃO #####
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -89,15 +91,18 @@ app.post("/api/clock-in", verifyFirebaseToken, async (req, res) => {
           .timestamp.toDate()
           .getTime();
         const diff = now.getTime() - lastTimestamp;
-        if (diff < TEN_MINUTES_IN_MS) {
+        
+        // ##### INÍCIO DA ALTERAÇÃO #####
+        if (diff < REGISTRATION_COOLDOWN_MS) {
           return res
             .status(429)
             .json({
               error: `Aguarde mais ${Math.ceil(
-                (TEN_MINUTES_IN_MS - diff) / 1000
+                (REGISTRATION_COOLDOWN_MS - diff) / 1000
               )} segundos para registrar novamente.`,
             });
         }
+        // ##### FIM DA ALTERAÇÃO #####
       }
     }
 
