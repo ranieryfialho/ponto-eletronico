@@ -557,7 +557,7 @@ export function AdminPanel({ onBack }) {
                   Gerenciar Kiosks
                 </h3>
                 <p className="text-sm text-gray-500">
-                  Cadastre os terminais de ponto (computadores).
+                  Cadastre os terminais de ponto.
                 </p>
               </button>
 
