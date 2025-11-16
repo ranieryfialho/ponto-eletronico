@@ -558,7 +558,23 @@ function App() {
 
   const handleConfirmAction = () => {
     setIsConfirmationModalOpen(false);
-    executeRegistration();
+    
+    if (!confirmationAction) return;
+
+    if (confirmationAction.type === 'DEAUTHORIZE_KIOSK') {
+      try {
+        localStorage.removeItem('kioskToken');
+        setKioskToken(null);
+        toast.warn('Kiosk desautorizado.');
+        setMessage('Pronto para iniciar o expediente!');
+      } catch (err) {
+        toast.error('Falha ao desautorizar.');
+      }
+    } else {
+      executeRegistration();
+    }
+    
+    setConfirmationAction(null);
   };
 
   const handleSubmitJustification = async (justification) => {
@@ -590,17 +606,13 @@ function App() {
   };
 
   const handleDeauthorizeKiosk = () => {
-    if (window.confirm('Tem certeza que deseja desautorizar este computador como um Kiosk?')) {
-      try {
-        localStorage.removeItem('kioskToken');
-        setKioskToken(null);
-        toast.warn('Kiosk desautorizado.');
-        setMessage('Pronto para iniciar o expediente!');
-      } catch (err) {
-        toast.error('Falha ao desautorizar.');
-      }
-    }
-  }
+    setConfirmationAction({
+      type: 'DEAUTHORIZE_KIOSK',
+      title: 'Desautorizar Kiosk',
+      message: 'Tem certeza que deseja desautorizar este computador como um Kiosk?'
+    });
+    setIsConfirmationModalOpen(true);
+  };
 
   const renderActionButtons = () => {
     if (timeToWait > 0) {
@@ -757,13 +769,12 @@ function App() {
             Sair
           </button>
 
-          {/* ##### INÍCIO DA ALTERAÇÃO VISUAL ##### */}
           {isAdmin && (
             <div className="mt-8 border-t pt-6">
               {!kioskToken ? (
                 <button
                   type="button"
-                  onClick={handleAuthorizeKiosk}
+                  onClick={handleAuthorizeKiosk} 
                   className="w-full text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg transition-colors shadow-sm border border-gray-300"
                 >
                   Autorizar este Kiosk
@@ -779,7 +790,6 @@ function App() {
               )}
             </div>
           )}
-          {/* ##### FIM DA ALTERAÇÃO VISUAL ##### */}
 
         </div>
 

@@ -15,6 +15,7 @@ const Tag = ({ text, color }) => {
     purple: "bg-purple-100 text-purple-800",
     yellow: "bg-yellow-100 text-yellow-800",
     orange: "bg-orange-100 text-orange-800",
+    gray: "bg-gray-100 text-gray-800",
   };
   return (
     <span
@@ -38,6 +39,8 @@ function ManageUsersView() {
   const [editingUser, setEditingUser] = useState(null);
   const [linkMessage, setLinkMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+
+  const [statusFilter, setStatusFilter] = useState("ativo");
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -70,14 +73,22 @@ function ManageUsersView() {
   }, [reportingUser, fetchUsers]);
 
   const filteredUsers = useMemo(() => {
-    return users.filter(
-      (user) =>
-        (user.displayName &&
-          user.displayName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (user.email &&
-          user.email.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  }, [users, searchTerm]);
+    return users
+      .filter((user) => {
+        if (statusFilter === "todos") return true;
+        return user.status === statusFilter;
+      })
+      .filter((user) => {
+        const search = searchTerm.toLowerCase();
+        if (!search) return true;
+        return (
+          (user.displayName &&
+            user.displayName.toLowerCase().includes(search)) ||
+          (user.email &&
+            user.email.toLowerCase().includes(search))
+        );
+      });
+  }, [users, searchTerm, statusFilter]);
 
   const getLocationTag_Fallback = (location) => {
     switch (location) {
@@ -103,12 +114,13 @@ function ManageUsersView() {
         let color = "purple";
         if (locName.toLowerCase().includes("matriz")) color = "blue";
         if (locName.toLowerCase().includes("externo")) color = "orange";
+        if (locName.toLowerCase().includes("kiosk")) color = "gray";
         return <Tag key={locName} text={locName} color={color} />;
       });
     }
-
     return getLocationTag_Fallback(locationData);
   };
+  
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -278,18 +290,38 @@ function ManageUsersView() {
         </div>
 
         <div className="bg-white rounded-xl shadow-md border border-gray-200">
-          <div className="p-6 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <h2 className="text-xl font-semibold text-gray-700">
+          <div className="p-6 border-b border-gray-200 flex flex-col lg:flex-row justify-between lg:items-center gap-4">
+            <h2 className="text-xl font-semibold text-gray-700 shrink-0">
               Funcionários Cadastrados
             </h2>
-            <input
-              type="text"
-              placeholder="Buscar por nome ou e-mail..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full sm:w-64 p-2 border border-gray-300 rounded-lg"
-            />
+            
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full lg:w-auto">
+              <div className="flex items-center space-x-3 sm:space-x-4 p-2 bg-gray-50 rounded-lg border">
+                <span className="text-sm font-medium text-gray-700 pl-2">Status:</span>
+                <label className="flex items-center text-sm cursor-pointer">
+                  <input type="radio" name="statusFilter" value="ativo" checked={statusFilter === "ativo"} onChange={(e) => setStatusFilter(e.target.value)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" />
+                  <span className="ml-2 text-gray-700">Ativos</span>
+                </label>
+                <label className="flex items-center text-sm cursor-pointer">
+                  <input type="radio" name="statusFilter" value="inativo" checked={statusFilter === "inativo"} onChange={(e) => setStatusFilter(e.target.value)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" />
+                  <span className="ml-2 text-gray-700">Inativos</span>
+                </label>
+                <label className="flex items-center text-sm cursor-pointer">
+                  <input type="radio" name="statusFilter" value="todos" checked={statusFilter === "todos"} onChange={(e) => setStatusFilter(e.target.value)} className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300" />
+                  <span className="ml-2 text-gray-700">Todos</span>
+                </label>
+              </div>
+              
+              <input
+                type="text"
+                placeholder="Buscar por nome ou e-mail..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-64 p-2 border border-gray-300 rounded-lg"
+              />
+            </div>
           </div>
+
           {linkMessage && (
             <div className="mx-6 mt-4 p-3 bg-gray-50 rounded-lg border">
               {linkMessage}
@@ -325,10 +357,7 @@ function ManageUsersView() {
                           ) : (
                             <Tag text="Inativo" color="red" />
                           )}
-                          {/* ##### INÍCIO DA ALTERAÇÃO ##### */}
-                          {/* Chamando a nova função para renderizar as tags de local */}
                           {renderLocationTags(user.location)}
-                          {/* ##### FIM DA ALTERAÇÃO ##### */}
                         </div>
                         <p className="text-gray-500 mt-1">{user.email}</p>
                       </td>
@@ -471,7 +500,7 @@ export function AdminPanel({ onBack }) {
         return <PendingApprovals />;
       case "company":
         return <CompanyProfile />;
-      case "kiosks":
+      case "kiosks": 
         return <KioskManagement />;
       default:
         return (
